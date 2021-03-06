@@ -4,6 +4,8 @@ import           Control.Monad.State
 import           Data.Foldable
 import qualified Data.Map.Strict               as M
 import qualified Parser                        as P
+import           Text.ParserCombinators.Parsec.Pos
+                                                ( sourceLine )
 
 newtype Lbl = Lbl Int
   deriving (Show, Eq, Ord)
@@ -36,8 +38,9 @@ data Instr
   | Intrinsic Intrinsic
   deriving (Show)
 
-data Intrinsic = Print
+data Intrinsic = Print | Here Int
   deriving Show
+
 
 type CompState = State Lbl
 
@@ -52,13 +55,6 @@ class Compile a where
   compile :: a -> CompState [Instr]
 
 instance Compile P.Stmt where
-  {-
-      data Stmt = Seq [Stmt]
-              | Assign String AExpr
-              | If BExpr Stmt Stmt
-              | While BExpr Stmt
-              | Skip
-  -}
   compile (P.Seq []            ) = return []
   compile (P.Seq (stmt : stmts)) = do
     stmt'  <- compile stmt
@@ -94,74 +90,50 @@ instance Compile P.Stmt where
       ++ body'
       ++ [Compile.Jmp top]
       ++ [Compile.Label end]
-  compile (P.Intrinsic name args) = do
-    args' <- mapM compile args -- TODO: remove head
-    return $ join args' ++ [Compile.Intrinsic Print]
+  compile (P.Expr expr) = compile expr
 
-instance Compile P.ABinOp where
+instance Compile P.ArithOp where
   compile op = return $ case op of
     P.Add -> [Compile.Add]
     P.Sub -> [Compile.Sub]
     P.Mul -> [Compile.Mul]
     P.Div -> [Compile.Div]
 
-instance Compile P.AExpr where
-  {-
-  data AExpr = Var String
-             | IntConst Integer
-             | Neg AExpr
-             | ABinary ABinOp AExpr AExpr
-             deriving (Show)
-
-  data ABinOp = Add
-              | Subtract
-              | Multiply
-              | Divide
-              deriving (Show)
-      -}
-  compile (P.Var      name) = return [Compile.Load name]
-  compile (P.IntConst x   ) = return [Compile.Const $ VInt x]
-  compile (P.Neg      expr) = do
+instance Compile P.Expr where
+  compile (P.Var     name ) = return [Compile.Load name]
+  compile (P.Literal lit  ) = return [Compile.Const (valueFromLit lit)]
+  compile (P.Unary op expr) = do
     expr' <- compile expr
-    return $ expr' ++ [Compile.Neg]
-  compile (P.ABinary op x y) = do
-    x'  <- compile x
+    op'   <- compile op
+    return $ expr' ++ op'
+  compile (P.Binary op x y) = do
     y'  <- compile y
-    op' <- compile op
-    return $ x' ++ y' ++ op'
-
-instance Compile P.BExpr where
-  {-
-  data BExpr = BoolConst Bool
-             | Not BExpr
-             | BBinary BBinOp BExpr BExpr
-             | RBinary RBinOp AExpr AExpr
-               deriving (Show)
-
-  data BBinOp = And | Or | Xor deriving (Show)
-
-  data RBinOp = Greater
-              | Less
-              | Equal
-              | NotEqual
-                deriving (Show)
-      -}
-  compile (P.BoolConst b    ) = return [Compile.Const $ VBool b]
-  compile (P.Not       bexpr) = do
-    bexpr' <- compile bexpr
-    return $ bexpr' ++ [Compile.Not]
-  compile (P.BBinary op x y) = do
     x'  <- compile x
-    y'  <- compile y
     op' <- compile op
-    return $ x' ++ y' ++ op'
-  compile (P.RBinary op x y) = do
-    x'  <- compile x
-    y'  <- compile y
-    op' <- compile op
-    return $ x' ++ y' ++ op'
+    -- NOTE: you gotta reverse these args below!
+    return $ y' ++ x' ++ op'
+  compile (P.Intrinsic pos name args) = do
+    args' <- mapM compile args
+    return $ join args' ++ [Compile.Intrinsic op]
+   where
+    op = case name of
+      "print" -> Print
+      "here"  -> Here (sourceLine pos)
 
-instance Compile P.BBinOp where
+instance Compile P.UnaryOp where
+  compile P.Not = return [Compile.Not]
+  compile P.Neg = return [Compile.Neg]
+
+valueFromLit :: P.Lit -> Compile.Value
+valueFromLit (P.Int  x) = Compile.VInt x
+valueFromLit (P.Bool x) = Compile.VBool x
+
+instance Compile P.BinOp where
+  compile (P.ArithOp op) = compile op
+  compile (P.BoolOp  op) = compile op
+  compile (P.RelOp   op) = compile op
+
+instance Compile P.BoolOp where
   compile op = return $ case op of
     P.And -> [Compile.And]
     P.Or  -> [Compile.Or]
@@ -178,7 +150,7 @@ instance Compile P.BBinOp where
       , Compile.And
       ]
 
-instance Compile P.RBinOp where
+instance Compile P.RelOp where
   compile op = return $ case op of
     P.Gt  -> [Compile.Gt]
     P.Lt  -> [Compile.Lt]

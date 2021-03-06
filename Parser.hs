@@ -49,7 +49,7 @@ data Expr
   | Literal Lit
   | Unary UnaryOp Expr
   | Binary BinOp Expr Expr
-  | Intrinsic String [Expr]
+  | Intrinsic SourcePos String [Expr]
   deriving (Show)
 
 data Stmt
@@ -169,20 +169,25 @@ assignStmt = do
   expr <- expression
   return $ Assign var expr
 
-intrStmt :: Parser Expr
-intrStmt = do
-  reserved "intr"
-  symbol "."
-  name <- identifier
-  args <- brackets (commaSep expression)
-  return $ Intrinsic name args
-
 -- Expressions
 expression :: Parser Expr
 expression = buildExpressionParser arithOperators term
 
 term :: Parser Expr
-term = parens expression <|> (Var <$> identifier) <|> (Literal <$> literal)
+term =
+  parens expression
+    <|> (Var <$> identifier)
+    <|> (Literal <$> literal)
+    <|> intrExpr
+
+intrExpr :: Parser Expr
+intrExpr = do
+  pos <- getPosition
+  reserved "intr"
+  symbol "."
+  name <- identifier
+  args <- brackets (commaSep expression)
+  return $ Intrinsic pos name args
 
 literal :: Parser Lit
 literal = (Int <$> integer) <|> (Bool <$> boolean)

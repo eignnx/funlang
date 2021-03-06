@@ -1,0 +1,4 @@
+while true do
+    intr.print[111];
+end;
+intr.print[222];

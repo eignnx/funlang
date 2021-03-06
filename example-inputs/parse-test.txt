@@ -12,9 +12,9 @@ while x != 2 * y do
     intr.print[x];
     if x > y xor x < 2 then
         y = 2 - x;
-        nop # Careful: load bearing nop!
+        nop; # Careful: load bearing nop!
     else
-        x = 3 * y + 1
+        x = 3 * y + 1;
     end;
-    x = x - 1
-end
+    x = x - 1;
+end;
