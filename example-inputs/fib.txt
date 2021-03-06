@@ -1,0 +1,13 @@
+# fib[n] = fib[n-1] + fib[n-2]
+
+n = 100;
+i = 1;
+j = 0;
+while n < 0 do
+    intr.print[i];
+    tmp = i + j;
+    j = i;
+    i = tmp;
+    n = n - 1
+end;
+intr.print[i]
