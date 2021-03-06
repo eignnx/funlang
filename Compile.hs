@@ -5,13 +5,17 @@ import           Data.Foldable
 import qualified Data.Map.Strict               as M
 import qualified Parser                        as P
 import           Text.ParserCombinators.Parsec.Pos
-                                                ( sourceLine )
+                                                ( SourcePos
+                                                , sourceLine
+                                                )
 
 newtype Lbl = Lbl Int
   deriving (Show, Eq, Ord)
 
-data Value = VInt Integer
-           | VBool Bool
+data Value
+  = VInt Integer
+  | VBool Bool
+  | VString String
   deriving (Show)
 
 data Instr
@@ -38,7 +42,7 @@ data Instr
   | Intrinsic Intrinsic
   deriving (Show)
 
-data Intrinsic = Print | Here Int
+data Intrinsic = Print | Here SourcePos
   deriving Show
 
 
@@ -118,15 +122,16 @@ instance Compile P.Expr where
    where
     op = case name of
       "print" -> Print
-      "here"  -> Here (sourceLine pos)
+      "here"  -> Here pos
 
 instance Compile P.UnaryOp where
   compile P.Not = return [Compile.Not]
   compile P.Neg = return [Compile.Neg]
 
 valueFromLit :: P.Lit -> Compile.Value
-valueFromLit (P.Int  x) = Compile.VInt x
-valueFromLit (P.Bool x) = Compile.VBool x
+valueFromLit (P.Int    x) = Compile.VInt x
+valueFromLit (P.Bool   x) = Compile.VBool x
+valueFromLit (P.String x) = Compile.VString x
 
 instance Compile P.BinOp where
   compile (P.ArithOp op) = compile op

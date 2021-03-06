@@ -37,6 +37,7 @@ data RelOp
 data Lit
   = Bool Bool
   | Int Integer
+  | String String
   deriving (Show)
 
 data UnaryOp
@@ -74,7 +75,6 @@ languageDef = emptyDef
                             , "while"
                             , "do"
                             , "end"
-                            , "intr"
                             , "nop"
                             , "true"
                             , "false"
@@ -122,6 +122,8 @@ whiteSpace = Token.whiteSpace lexer
 commaSep = Token.commaSep lexer
 
 symbol = Token.symbol lexer
+
+stringLiteral = Token.stringLiteral lexer
 
 -- Statments
 -- The main statement parser
@@ -178,19 +180,19 @@ term =
   parens expression
     <|> (Var <$> identifier)
     <|> (Literal <$> literal)
-    <|> intrExpr
+    <|> intrinsicExpr
 
-intrExpr :: Parser Expr
-intrExpr = do
+intrinsicExpr :: Parser Expr
+intrinsicExpr = do
   pos <- getPosition
-  reserved "intr"
-  symbol "."
+  symbol "@"
   name <- identifier
   args <- brackets (commaSep expression)
   return $ Intrinsic pos name args
 
 literal :: Parser Lit
-literal = (Int <$> integer) <|> (Bool <$> boolean)
+literal =
+  (Int <$> integer) <|> (Bool <$> boolean) <|> (String <$> stringLiteral)
  where
   boolean =
     (reserved "true" >> return True) <|> (reserved "false" >> return False)

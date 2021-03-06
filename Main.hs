@@ -46,5 +46,7 @@ printVm src = putStrLn $ unlines $ map show vm
     ir  = Compile.irFromAst ast
     vm  = Vm.vmFromIr ir
 
+runProgram src = compileAndRun $ Parser.parseString src
+
 test =
     "n = 100; i = 1; j = 0; intr.print[999]; intr.here[]; while n > 0 do     intr.here[];     tmp = i + j;     j = i;     i = tmp;     n = n - 1; end; intr.print[i];"

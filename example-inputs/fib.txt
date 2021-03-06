@@ -3,13 +3,13 @@
 n = 100;
 i = 1;
 j = 0;
-intr.here[];
+@here[];
 while n > 0 do
     nxt = i + j;
     j = i;
     i = nxt;
-    intr.print[i];
+    @print[i];
     n = n - 1;
 end;
-intr.here[];
-intr.print[i];
+@here[];
+@print[i];

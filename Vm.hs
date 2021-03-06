@@ -235,8 +235,8 @@ runIntrinsic op = case op of
   C.Print -> do
     x <- pop
     lift $ print x
-  C.Here line -> do
-    lift $ putStrLn ("intr.here[] @ " ++ show line)
+  C.Here pos -> do
+    lift $ putStrLn ("@here[] at " ++ show pos)
 
 testProgram =
   [ Vm.Const (C.VInt 0)
