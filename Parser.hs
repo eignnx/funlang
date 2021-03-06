@@ -200,12 +200,14 @@ bOperators =
 
 
 -- Relational Operator Expressions
+rExpression :: Parser BExpr
 rExpression = do
   a1 <- aExpression
   op <- relation
   a2 <- aExpression
   return $ RBinary op a1 a2
 
+relation :: Parser RBinOp
 relation =
   (reservedOp ">" >> return Gt)
     <|> (reservedOp "<" >> return Lt)
