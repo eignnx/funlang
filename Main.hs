@@ -8,7 +8,7 @@ import qualified Vm
 
 compileAndRun :: String -> IO ()
 compileAndRun src = do
-    let ast      = Parser.parseString src
+    let ast      = Parser.parseSrc src
     let irInstrs = Compile.irFromAst ast
     let vmInstrs = Vm.vmFromIr irInstrs
     Vm.execVmProgram vmInstrs

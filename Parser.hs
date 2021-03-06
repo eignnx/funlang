@@ -8,45 +8,57 @@ import           Text.ParserCombinators.Parsec.Language
 import qualified Text.ParserCombinators.Parsec.Token
                                                as Token
 
-data BExpr = BoolConst Bool
-           | Not BExpr
-           | BBinary BBinOp BExpr BExpr
-           | RBinary RBinOp AExpr AExpr
+data BinOp
+  = ArithOp ArithOp
+  | BoolOp BoolOp
+  | RelOp RelOp
   deriving (Show)
 
-data BBinOp = And
-            | Or
-            | Xor
-  deriving (Show)
-
-data RBinOp = Gt
-            | Lt
-            | Eq
-            | Neq
-  deriving (Show)
-
--- Arithmetic Expressions
-data AExpr
-  = Var String
-  | IntConst Integer
-  | Neg AExpr
-  | ABinary ABinOp AExpr AExpr
-  deriving (Show)
-
-data ABinOp
+data ArithOp
   = Add
   | Sub
   | Mul
   | Div
   deriving (Show)
 
+data BoolOp
+  = And
+  | Or
+  | Xor
+  deriving (Show)
+
+data RelOp
+  = Gt
+  | Lt
+  | Eq
+  | Neq
+  deriving (Show)
+
+data Lit
+  = Bool Bool
+  | Int Integer
+  deriving (Show)
+
+data UnaryOp
+  = Not
+  | Neg
+  deriving (Show)
+
+data Expr
+  = Var String
+  | Literal Lit
+  | Unary UnaryOp Expr
+  | Binary BinOp Expr Expr
+  | Intrinsic String [Expr]
+  deriving (Show)
+
 data Stmt
   = Seq [Stmt]
-  | Assign String AExpr
-  | If BExpr Stmt Stmt
-  | While BExpr Stmt
+  | Assign String Expr
+  | If Expr Stmt Stmt
+  | While Expr Stmt
   | Skip
-  | Intrinsic String [AExpr]
+  | Expr Expr
   deriving (Show)
 
 languageDef = emptyDef
@@ -99,6 +111,8 @@ parens = Token.parens lexer
 
 brackets = Token.brackets lexer
 
+braces = Token.braces lexer
+
 integer = Token.integer lexer
 
 semiSep1 = Token.semiSep1 lexer
@@ -115,19 +129,20 @@ whileParser :: Parser Stmt
 whileParser = whiteSpace >> statement
 
 statement :: Parser Stmt
-statement = parens statement <|> sequenceOfStmt
+statement = braces statement <|> sequenceOfStmt
 
 sequenceOfStmt = do
-  list <- semiSep1 statement'
-  return $ if length list == 1 then head list else Seq list
+  stmts <- many1 (statement' <* symbol ";")
+  return $ if length stmts == 1 then head stmts else Seq stmts
 
 statement' :: Parser Stmt
-statement' = ifStmt <|> whileStmt <|> skipStmt <|> assignStmt <|> intrStmt
+statement' =
+  ifStmt <|> whileStmt <|> skipStmt <|> assignStmt <|> (Expr <$> expression)
 
 ifStmt :: Parser Stmt
 ifStmt = do
   reserved "if"
-  cond <- bExpression
+  cond <- expression
   reserved "then"
   stmt1 <- statement
   reserved "else"
@@ -138,7 +153,7 @@ ifStmt = do
 whileStmt :: Parser Stmt
 whileStmt = do
   reserved "while"
-  cond <- bExpression
+  cond <- expression
   reserved "do"
   stmt <- statement
   reserved "end"
@@ -151,72 +166,58 @@ assignStmt :: Parser Stmt
 assignStmt = do
   var <- identifier
   reservedOp "="
-  expr <- aExpression
+  expr <- expression
   return $ Assign var expr
 
-intrStmt :: Parser Stmt
+intrStmt :: Parser Expr
 intrStmt = do
   reserved "intr"
   symbol "."
   name <- identifier
-  args <- brackets (commaSep aExpression)
+  args <- brackets (commaSep expression)
   return $ Intrinsic name args
 
-
 -- Expressions
-aTerm :: Parser AExpr
-aTerm = parens aExpression <|> fmap Var identifier <|> fmap IntConst integer
+expression :: Parser Expr
+expression = buildExpressionParser arithOperators term
 
-aExpression :: Parser AExpr
-aExpression = buildExpressionParser aOperators aTerm
+term :: Parser Expr
+term = parens expression <|> (Var <$> identifier) <|> (Literal <$> literal)
 
-aOperators =
-  [ [Prefix (reservedOp "-" >> return Neg)]
-  , [ Infix (reservedOp "*" >> return (ABinary Mul)) AssocLeft
-    , Infix (reservedOp "/" >> return (ABinary Div)) AssocLeft
+literal :: Parser Lit
+literal = (Int <$> integer) <|> (Bool <$> boolean)
+ where
+  boolean =
+    (reserved "true" >> return True) <|> (reserved "false" >> return False)
+
+
+arithOperators =
+  [ [ Prefix (reservedOp "-" >> return (Unary Neg))
+    , Prefix (reservedOp "not" >> return (Unary Not))
     ]
-  , [ Infix (reservedOp "+" >> return (ABinary Add)) AssocLeft
-    , Infix (reservedOp "-" >> return (ABinary Sub)) AssocLeft
+  , [ Infix (reservedOp "*" >> return (Binary (ArithOp Mul))) AssocLeft
+    , Infix (reservedOp "/" >> return (Binary (ArithOp Div))) AssocLeft
+    ]
+  , [ Infix (reservedOp "+" >> return (Binary (ArithOp Add))) AssocLeft
+    , Infix (reservedOp "-" >> return (Binary (ArithOp Sub))) AssocLeft
+    ]
+  , [ Infix (reservedOp ">" >> return (Binary (RelOp Gt)))   AssocLeft
+    , Infix (reservedOp "<" >> return (Binary (RelOp Lt)))   AssocLeft
+    , Infix (reservedOp "==" >> return (Binary (RelOp Eq)))  AssocLeft
+    , Infix (reservedOp "!=" >> return (Binary (RelOp Neq))) AssocLeft
+    ]
+  , [ Infix (reservedOp "and" >> return (Binary (BoolOp And))) AssocLeft
+    , Infix (reservedOp "or" >> return (Binary (BoolOp Or)))   AssocLeft
+    , Infix (reservedOp "xor" >> return (Binary (BoolOp Xor))) AssocLeft
     ]
   ]
-
-bTerm :: Parser BExpr
-bTerm =
-  parens bExpression
-    <|> (reserved "true" >> return (BoolConst True))
-    <|> (reserved "false" >> return (BoolConst False))
-    <|> rExpression
-
-bExpression :: Parser BExpr
-bExpression = buildExpressionParser bOperators bTerm
-
-bOperators =
-  [ [Prefix (reservedOp "not" >> return Not)]
-  , [ Infix (reservedOp "and" >> return (BBinary And)) AssocLeft
-    , Infix (reservedOp "or" >> return (BBinary Or))   AssocLeft
-    , Infix (reservedOp "xor" >> return (BBinary Xor)) AssocLeft
-    ]
-  ]
-
-
--- Relational Operator Expressions
-rExpression :: Parser BExpr
-rExpression = do
-  a1 <- aExpression
-  op <- relation
-  a2 <- aExpression
-  return $ RBinary op a1 a2
-
-relation :: Parser RBinOp
-relation =
-  (reservedOp ">" >> return Gt)
-    <|> (reservedOp "<" >> return Lt)
-    <|> (reservedOp "==" >> return Eq)
-    <|> (reservedOp "!=" >> return Neq)
 
 -- REPL Helper Functions
 parseString :: String -> Stmt
-parseString str = case parse whileParser "<string input>" str of
+parseString str = parseSrc "<string input>" str
+
+parseSrc :: String -> String -> Stmt
+parseSrc file src = case parse whileParser file src of
   Left  e -> error $ show e
   Right r -> r
 
