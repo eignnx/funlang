@@ -18,6 +18,11 @@ data Value
   | VString String
   deriving (Show)
 
+displayValue :: Value -> IO ()
+displayValue (VInt    x) = print x
+displayValue (VBool   x) = print x
+displayValue (VString x) = print x
+
 data Instr
   = Load String
   | Store String

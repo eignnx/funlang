@@ -1,6 +1,6 @@
 module Vm where
 
-import qualified Compile                       as C
+import qualified Compile                       as Ir
 import           Control.Monad                  ( unless )
 import           Control.Monad.Reader
 import           Control.Monad.State
@@ -10,7 +10,7 @@ import qualified Data.Map.Strict               as M
 data Instr
   = Load String
   | Store String
-  | Const C.Value -- Push an immediate value onto stack
+  | Const Ir.Value -- Push an immediate value onto stack
   | Dup -- Stack operations
   | Over -- "
   | Rot -- "
@@ -28,25 +28,25 @@ data Instr
   | Nop -- Used to replace labels
   | JmpIfFalse Int
   | Jmp Int
-  | Intrinsic C.Intrinsic
+  | Intrinsic Ir.Intrinsic
   deriving (Show)
 
--------------------------TRANSLATING FROM C.Instr------------------
+-------------------------TRANSLATING FROM Ir.Instr------------------
 
-vmFromIr :: [C.Instr] -> [Vm.Instr]
+vmFromIr :: [Ir.Instr] -> [Vm.Instr]
 vmFromIr instrs = map (translateInstr labels) instrs
   where labels = findLbls instrs
 
 -------------------------FIRST PASS--------------------------------
-type LblMap = M.Map C.Lbl Int
+type LblMap = M.Map Ir.Lbl Int
 
-findLbls :: [C.Instr] -> LblMap
+findLbls :: [Ir.Instr] -> LblMap
 findLbls instrs = go instrs 0 M.empty
  where
-  go :: [C.Instr] -> Int -> LblMap -> LblMap
+  go :: [Ir.Instr] -> Int -> LblMap -> LblMap
   go []               _        labels = labels
   go (instr : instrs) instrIdx labels = case instr of
-    C.Label lbl -> go instrs (instrIdx + 1) labels'
+    Ir.Label lbl -> go instrs (instrIdx + 1) labels'
       where labels' = M.insert lbl instrIdx labels
     _ -> go instrs (instrIdx + 1) labels
 
@@ -55,31 +55,31 @@ findLbls instrs = go instrs 0 M.empty
 --
 -- Does the translation given a complete map of labels-to-instrIdx's. 
 --
-translateInstr :: LblMap -> C.Instr -> Vm.Instr
+translateInstr :: LblMap -> Ir.Instr -> Vm.Instr
 translateInstr labels instr = case instr of
-  C.Load  var       -> Vm.Load var
-  C.Store var       -> Vm.Store var
-  C.Const val       -> Vm.Const val
-  C.Dup             -> Vm.Dup
-  C.Over            -> Vm.Over
-  C.Rot             -> Vm.Rot
-  C.Add             -> Vm.Add
-  C.Sub             -> Vm.Sub
-  C.Mul             -> Vm.Mul
-  C.Div             -> Vm.Div
-  C.Neg             -> Vm.Neg
-  C.And             -> Vm.And
-  C.Or              -> Vm.Or
-  C.Not             -> Vm.Not
-  C.Eq              -> Vm.Eq
-  C.Gt              -> Vm.Gt
-  C.Lt              -> Vm.Lt
-  C.Label      lbl  -> Vm.Nop -- Labels are translated to no-ops.
-  C.JmpIfFalse lbl  -> translateJmp lbl Vm.JmpIfFalse labels
-  C.Jmp        lbl  -> translateJmp lbl Vm.Jmp labels
-  C.Intrinsic  intr -> Vm.Intrinsic intr
+  Ir.Load  var       -> Vm.Load var
+  Ir.Store var       -> Vm.Store var
+  Ir.Const val       -> Vm.Const val
+  Ir.Dup             -> Vm.Dup
+  Ir.Over            -> Vm.Over
+  Ir.Rot             -> Vm.Rot
+  Ir.Add             -> Vm.Add
+  Ir.Sub             -> Vm.Sub
+  Ir.Mul             -> Vm.Mul
+  Ir.Div             -> Vm.Div
+  Ir.Neg             -> Vm.Neg
+  Ir.And             -> Vm.And
+  Ir.Or              -> Vm.Or
+  Ir.Not             -> Vm.Not
+  Ir.Eq              -> Vm.Eq
+  Ir.Gt              -> Vm.Gt
+  Ir.Lt              -> Vm.Lt
+  Ir.Label      lbl  -> Vm.Nop -- Labels are translated to no-ops.
+  Ir.JmpIfFalse lbl  -> translateJmp lbl Vm.JmpIfFalse labels
+  Ir.Jmp        lbl  -> translateJmp lbl Vm.Jmp labels
+  Ir.Intrinsic  intr -> Vm.Intrinsic intr
 
-translateJmp :: C.Lbl -> (Int -> Vm.Instr) -> LblMap -> Vm.Instr
+translateJmp :: Ir.Lbl -> (Int -> Vm.Instr) -> LblMap -> Vm.Instr
 translateJmp lbl jmpConstructor labels = do
   let assocdIdx = M.lookup lbl labels
   case assocdIdx of
@@ -90,9 +90,9 @@ translateJmp lbl jmpConstructor labels = do
 
 -------------------------------------------------------------------
 
-type Stack = [C.Value]
+type Stack = [Ir.Value]
 
-type Memory = [M.Map String C.Value]
+type Memory = [M.Map String Ir.Value]
 
 type Pc = Int
 
@@ -100,12 +100,13 @@ data VmState = VmState
   { memory :: Memory
   , stack  :: Stack
   , pc     :: Pc
+  , instrs :: [Vm.Instr]
   }
   deriving Show
 
 type VmProgram = StateT VmState IO
 
-pop :: VmProgram C.Value
+pop :: VmProgram Ir.Value
 pop = do
   state <- get
   case stack state of
@@ -117,16 +118,16 @@ pop = do
 popInt :: VmProgram Integer
 popInt = do
   val <- pop
-  let C.VInt x = val
+  let Ir.VInt x = val
   return x
 
 popBool :: VmProgram Bool
 popBool = do
   val <- pop
-  let C.VBool x = val
+  let Ir.VBool x = val
   return x
 
-push :: C.Value -> VmProgram ()
+push :: Ir.Value -> VmProgram ()
 push value = do
   state <- get
   put $ state { stack = value : stack state }
@@ -160,19 +161,19 @@ stepIntBinOp :: (Integer -> Integer -> Integer) -> VmProgram ()
 stepIntBinOp op = do
   x <- popInt
   y <- popInt
-  push $ C.VInt $ x `op` y
+  push $ Ir.VInt $ x `op` y
 
 stepIntBoolBinOp :: (Integer -> Integer -> Bool) -> VmProgram ()
 stepIntBoolBinOp op = do
   x <- popInt
   y <- popInt
-  push $ C.VBool $ x `op` y
+  push $ Ir.VBool $ x `op` y
 
 stepBoolBinOp :: (Bool -> Bool -> Bool) -> VmProgram ()
 stepBoolBinOp op = do
   x <- popBool
   y <- popBool
-  push $ C.VBool $ x `op` y
+  push $ Ir.VBool $ x `op` y
 
 stepVm :: Vm.Instr -> VmProgram ()
 stepVm instr = do
@@ -211,7 +212,7 @@ stepVm instr = do
     Vm.Div -> stepIntBinOp div
     Vm.Neg -> do
       i <- popInt
-      push (C.VInt (-i))
+      push (Ir.VInt (-i))
     Vm.Eq  -> stepIntBoolBinOp (==)
     Vm.Gt  -> stepIntBoolBinOp (>)
     Vm.Lt  -> stepIntBoolBinOp (<)
@@ -219,7 +220,7 @@ stepVm instr = do
     Vm.Or  -> stepBoolBinOp (||)
     Vm.Not -> do
       b <- popBool
-      push (C.VBool (not b))
+      push (Ir.VBool (not b))
     Vm.Jmp        idx -> setPc (idx - 1)
     Vm.JmpIfFalse idx -> do
       b <- popBool
@@ -230,30 +231,30 @@ stepVm instr = do
       return ()
     Vm.Intrinsic intr -> runIntrinsic intr
 
-runIntrinsic :: C.Intrinsic -> VmProgram ()
+runIntrinsic :: Ir.Intrinsic -> VmProgram ()
 runIntrinsic op = case op of
-  C.Print -> do
+  Ir.Print -> do
     x <- pop
-    lift $ print x
-  C.Here pos -> do
+    lift $ Ir.displayValue x
+  Ir.Here pos -> do
     lift $ putStrLn ("@here[] at " ++ show pos)
 
 testProgram =
-  [ Vm.Const (C.VInt 0)
+  [ Vm.Const (Ir.VInt 0)
   , Vm.Store "x"
   , Vm.Load "x" -- <<<
-  , Vm.Intrinsic C.Print
+  , Vm.Intrinsic Ir.Print
   , Vm.Load "x"
-  , Vm.Const (C.VInt 1)
+  , Vm.Const (Ir.VInt 1)
   , Vm.Add
   , Vm.Store "x"
   , Vm.Load "x"
-  , Vm.Const (C.VInt 5)
+  , Vm.Const (Ir.VInt 5)
   , Vm.Gt
   , Vm.JmpIfFalse 13
   , Vm.Jmp 2
-  , Vm.Const (C.VBool True) -- <<<
-  , Vm.Intrinsic C.Print
+  , Vm.Const (Ir.VBool True) -- <<<
+  , Vm.Intrinsic Ir.Print
   ]
 
 nth :: (Ord i, Num i) => [a] -> i -> Maybe a
@@ -262,25 +263,30 @@ nth []       n  = Nothing
 nth (x : xs) 0  = Just x
 nth (_ : xs) n  = nth xs (n - 1)
 
-debugStepProgram :: [Vm.Instr] -> VmProgram ()
-debugStepProgram instrs = do
-  pc1 <- gets pc
-  st  <- get
+debugStepProgram :: VmProgram ()
+debugStepProgram = do
+  pc1     <- gets pc
+  instrs1 <- gets instrs
+  st      <- get
   lift $ putChar '\t'
   lift $ print st
   lift $ putStr "\texecuting instr: "
-  lift $ print (nth instrs pc1)
-  Data.Foldable.mapM_ stepVm (nth instrs pc1)
+  lift $ print (nth instrs1 pc1)
+  Data.Foldable.mapM_ stepVm (nth instrs1 pc1)
 
-runProgram :: [Vm.Instr] -> VmProgram ()
-runProgram instrs = do
-  pc1 <- gets pc
-  case nth instrs pc1 of
-    Just instr -> stepVm instr >> runProgram instrs
-    Nothing    -> return ()
+runProgram :: VmProgram ()
+runProgram = do
+  pc1     <- gets pc
+  instrs1 <- gets instrs
+  case nth instrs1 pc1 of
+    Just instr -> do
+      stepVm instr
+      runProgram
+    Nothing -> return ()
 
-initState :: VmState
-initState = VmState { memory = [M.empty], stack = [], pc = 0 }
+initState :: [Vm.Instr] -> VmState
+initState instrs =
+  VmState { memory = [M.empty], stack = [], pc = 0, instrs = instrs }
 
-execVmProgram :: [Instr] -> IO VmState
-execVmProgram program = execStateT (runProgram program) initState
+execVmProgram :: [Vm.Instr] -> IO VmState
+execVmProgram program = execStateT runProgram (initState program)

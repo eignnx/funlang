@@ -1,6 +1,6 @@
 module Main where
 
-import qualified Compile
+import qualified Compile                       as Ir
 import           Control.Monad.State            ( evalState )
 import           Control.Monad.Trans            ( lift )
 import qualified Parser
@@ -9,7 +9,7 @@ import qualified Vm
 
 compileAndRun :: Parser.Stmt -> IO ()
 compileAndRun ast = do
-    let irInstrs = Compile.irFromAst ast
+    let irInstrs = Ir.irFromAst ast
     let vmInstrs = Vm.vmFromIr irInstrs
     Vm.execVmProgram vmInstrs
     return ()
@@ -38,12 +38,12 @@ printAst src = print $ Parser.parseString src
 printIr src = putStrLn $ unlines $ map show ir
   where
     ast = Parser.parseString src
-    ir  = Compile.irFromAst ast
+    ir  = Ir.irFromAst ast
 
 printVm src = putStrLn $ unlines $ map show vm
   where
     ast = Parser.parseString src
-    ir  = Compile.irFromAst ast
+    ir  = Ir.irFromAst ast
     vm  = Vm.vmFromIr ir
 
 runProgram src = compileAndRun $ Parser.parseString src
