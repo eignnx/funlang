@@ -133,30 +133,38 @@ langParser = whiteSpace >> many1 item
 item :: Parser Item
 item = def
 
--- def my-fn[arg1, arg2, ...]
---   ...expr...
+-- ```
+-- def my-fn[arg1, arg2, ...] do
+--   ...stmts...
 -- end
+-- ```
+-- OR
+-- ```
+-- def my-fn[arg1, arg2, ...] = ...expr...
 def :: Parser Item
 def = do
   reserved "def"
   name   <- identifier
   params <- brackets $ sepEndBy identifier (symbol ",")
-  expr <- expression
-  reserved "end"
+  expr <- (reservedOp "=" *> expression) <|> blockExpr
   return $ Def name params expr
 
 statement :: Parser Stmt
-statement =
-  ifStmt <|> whileStmt <|> skipStmt <|> try assignStmt <|> (Expr <$> expression)
+statement = ifStmt
+         <|> whileStmt
+         <|> skipStmt
+         <|> returnStmt
+         <|> try assignStmt
+         <|> exprStmt
 
 ifStmt :: Parser Stmt
 ifStmt = do
   reserved "if"
   cond <- expression
   reserved "then"
-  stmt1 <- statement
+  stmt1 <- (Expr . Block) <$> many statement
   reserved "else"
-  stmt2 <- statement
+  stmt2 <- (Expr . Block) <$> many statement
   reserved "end"
   return $ If cond stmt1 stmt2
 
@@ -164,19 +172,20 @@ whileStmt :: Parser Stmt
 whileStmt = do
   reserved "while"
   cond <- expression
-  reserved "do"
-  stmt <- statement
-  reserved "end"
+  stmt <- Expr <$> blockExpr
   return $ While cond stmt
 
 skipStmt :: Parser Stmt
-skipStmt = reserved "nop" >> return Skip
+skipStmt = reserved "nop" *> semi *> return Skip
 
 assignStmt :: Parser Stmt
-assignStmt = Assign <$> identifier <*> (reservedOp "=" *> expression)
+assignStmt = Assign <$> identifier <*> (reservedOp "=" *> expression) <* semi
 
 returnStmt :: Parser Stmt
-returnStmt = Ret <$> (reserved "ret" *> expression)
+returnStmt = Ret <$> (reserved "ret" *> expression <* semi)
+
+exprStmt :: Parser Stmt
+exprStmt = Expr <$> expression <* semi
 
 operators =
   [ [ Prefix (reservedOp "-" >> return (Unary Neg))
@@ -247,7 +256,7 @@ literal =
     (reserved "true" >> return True) <|> (reserved "false" >> return False)
 
 blockExpr :: Parser Expr
-blockExpr = Block <$> (reserved "do" *> sepEndBy statement semi <* reserved "end")
+blockExpr = Block <$> (reserved "do" *> many statement <* reserved "end")
 
 -- REPL Helper Functions
 parseString :: String -> Ast

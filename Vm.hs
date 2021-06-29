@@ -237,7 +237,7 @@ runIntrinsic op = case op of
     x <- pop
     lift $ Ir.displayValue x
   Ir.Here pos -> do
-    lift $ putStrLn ("@here[] at " ++ show pos)
+    lift $ putStrLn ("intr.here[] at " ++ show pos)
 
 testProgram =
   [ Vm.Const (Ir.VInt 0)
