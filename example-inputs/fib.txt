@@ -1,15 +1,17 @@
 # fib[n] = fib[n-1] + fib[n-2]
 
-n = 100;
-i = 1;
-j = 0;
-@here[];
-while n > 0 do
-    nxt = i + j;
-    j = i;
-    i = nxt;
+def main[]
+    n = 100;
+    i = 1;
+    j = 0;
+    @here[];
+    while n > 0 do
+        nxt = i + j;
+        j = i;
+        i = nxt;
+        @print[i];
+        n = n - 1;
+    end;
+    @here[];
     @print[i];
-    n = n - 1;
-end;
-@here[];
-@print[i];
+end

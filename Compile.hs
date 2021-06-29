@@ -12,6 +12,15 @@ import           Text.ParserCombinators.Parsec.Pos
 newtype Lbl = Lbl Int
   deriving (Show, Eq, Ord)
 
+instance Num Lbl where
+  (Lbl x) + (Lbl y) = Lbl (x + y)
+  (Lbl x) * (Lbl y) = Lbl (x * y)
+  negate (Lbl x) = Lbl (-x)
+  abs (Lbl x) = Lbl (abs x)
+  signum (Lbl x) = Lbl (signum x)
+  fromInteger x = Lbl $ fromInteger x
+
+
 data Value
   = VInt Integer
   | VBool Bool
@@ -45,30 +54,52 @@ data Instr
   | Jmp Lbl
   | Label Lbl
   | Intrinsic Intrinsic
+  | NewFrame -- Allocates a new call frame, sets it as current frame
+  | Param -- Pop TOS, stores it in current call frame.
   deriving (Show)
 
 data Intrinsic = Print | Here SourcePos
   deriving Show
 
 
-type CompState = State Lbl
+data CState = CState
+  { lbl_  :: Lbl
+  , defs_ :: [(String, Lbl)]
+  }
+  deriving Show
+
+type CompState = State CState
 
 fresh :: CompState Lbl
 fresh = do
-  lbl <- get
-  let Lbl x = lbl
-  put (Lbl (x + 1))
+  lbl <- gets lbl_
+  modify (\s -> s { lbl_ = lbl + 1 })
   return lbl
+
+define :: String -> Lbl -> CompState ()
+define name lbl = do
+  defs <- gets defs_
+  modify $ \st -> st { defs_ = (name, lbl) : defs }
+  return ()
 
 class Compile a where
   compile :: a -> CompState [Instr]
 
+instance Compile a => Compile [a] where
+  compile []       = return []
+  compile (x : xs) = do
+    x'  <- compile x
+    xs' <- compile xs
+    return (x' ++ xs')
+
+instance Compile P.Item where
+  compile (P.Def name params body) = do
+    lbl <- fresh
+    define name lbl
+    body' <- compile body
+    return $ Compile.Label lbl : body'
+
 instance Compile P.Stmt where
-  compile (P.Seq []            ) = return []
-  compile (P.Seq (stmt : stmts)) = do
-    stmt'  <- compile stmt
-    stmts' <- compile (P.Seq stmts)
-    return $ stmt' ++ stmts'
   compile P.Skip              = return []
   compile (P.Assign var expr) = do
     expr' <- compile expr
@@ -109,6 +140,11 @@ instance Compile P.ArithOp where
     P.Div -> [Compile.Div]
 
 instance Compile P.Expr where
+  compile (P.Block []            ) = return []
+  compile (P.Block (stmt : stmts)) = do
+    stmt'  <- compile stmt
+    stmts' <- compile (P.Block stmts)
+    return $ stmt' ++ stmts'
   compile (P.Var     name ) = return [Compile.Load name]
   compile (P.Literal lit  ) = return [Compile.Const (valueFromLit lit)]
   compile (P.Unary op expr) = do
@@ -121,6 +157,13 @@ instance Compile P.Expr where
     op' <- compile op
     -- NOTE: you gotta reverse these args below!
     return $ y' ++ x' ++ op'
+  compile (P.Call fn args) = do
+    args' <- mapM compile args
+    let args'' = map (Compile.Param :) args'
+    -- instrs <- (compile args) $ \arg -> do
+    --   return Add
+    return []
+
   compile (P.Intrinsic pos name args) = do
     args' <- mapM compile args
     return $ join args' ++ [Compile.Intrinsic op]
@@ -167,5 +210,13 @@ instance Compile P.RelOp where
     P.Eq  -> [Compile.Eq]
     P.Neq -> [Compile.Eq, Compile.Not]
 
+initialCState = CState { lbl_ = Lbl 0, defs_ = [] }
+
 irFromAst :: Compile a => a -> [Instr]
-irFromAst ast = evalState (compile ast) (Lbl 0)
+irFromAst ast = evalState (compile ast) initialCState
+
+runCompilation :: Compile a => a -> ([Instr], CState)
+runCompilation ast = runState (compile ast) initialCState
+
+getDefs ast = defs
+  where (instrs, CState { defs_ = defs }) = runCompilation ast

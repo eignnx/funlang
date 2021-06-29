@@ -7,7 +7,7 @@ import qualified Parser
 import           System.Environment             ( getArgs )
 import qualified Vm
 
-compileAndRun :: Parser.Stmt -> IO ()
+-- compileAndRun :: Parser.Stmt -> IO ()
 compileAndRun ast = do
     let irInstrs = Ir.irFromAst ast
     let vmInstrs = Vm.vmFromIr irInstrs
@@ -35,10 +35,16 @@ main = do
 
 printAst src = print $ Parser.parseString src
 
-printIr src = putStrLn $ unlines $ map show ir
+showAssoc assoc = unlines $ ["{"] ++ pairs ++ ["}"]
   where
-    ast = Parser.parseString src
-    ir  = Ir.irFromAst ast
+    pairs = map formatter assoc
+    formatter (key, val) = "\t" ++ show key ++ " = " ++ show val
+
+printIr src = putStrLn $ unlines $ header ++ map show ir
+  where
+    ast    = Parser.parseString src
+    header = ["Defs = " ++ showAssoc (Ir.getDefs ast)]
+    ir     = Ir.irFromAst ast
 
 printVm src = putStrLn $ unlines $ map show vm
   where
