@@ -49,11 +49,15 @@ instance Compile Ast.Item where
     lbl <- fresh
     define name lbl
     let paramBindings = map Hir.Store (reverse params)
+    let prologue = paramBindings -- First thing we do is store args (from stack) in memory.
     body' <- compile body
+    let epilogue = if name == "main"
+                      then [Hir.Intrinsic Intr.Exit]
+                      else [Hir.Ret] -- At the end of (almost) every function MUST be a return instr.
     return $  [Hir.Label lbl] -- Label the function.
-           ++ paramBindings -- First thing we do is store args (from stack) in memory.
+           ++ prologue -- First run the prologue.
            ++ body' -- Then run the body of the function.
-           ++ [Hir.Ret] -- At the end of every function MUST be a return instr.
+           ++ epilogue -- Finally, run the epilogue.
 
 instance Compile Ast.Stmt where
   compile Ast.Skip              = return []

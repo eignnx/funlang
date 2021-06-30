@@ -197,32 +197,32 @@ nth []       n  = Nothing
 nth (x : xs) 0  = Just x
 nth (_ : xs) n  = nth xs (n - 1)
 
-debugStepProgram :: VmProgram ()
-debugStepProgram = do
+debugStepProgram :: Lir.Instr -> VmProgram ()
+debugStepProgram instr = do
   instrs_  <- gets instrs
   pc_      <- gets pc
   stack_   <- gets stack
   memory_  <- gets memory
   let Lir.InstrAddr pcNum = pc_
-  lift $ putStrLn $ "\tInstr #" ++ show pcNum ++ ": " ++ maybe "???" show (nth instrs_ pc_)
+  lift $ putStrLn $ "\tInstr #" ++ show pcNum ++ ": " ++ show instr
   lift $ putStr "\tStack: "
   lift $ print stack_
   lift $ putStr "\tMemory: "
   lift $ print memory_
-  lift $ putStr "\tPress ENTER to step forward...\n"
-  input <- lift $ getLine
-  if input == "q" || input == "Q" || input == "quit"
-    then error "VM: Quitting trace debugger..."
-    else Data.Foldable.mapM_ stepVm (nth instrs_ pc_)
+  stepVm instr
 
 debugRunProgram :: VmProgram ()
 debugRunProgram = do
-  pc1     <- gets pc
-  instrs1 <- gets instrs
-  case nth instrs1 pc1 of
+  pc_     <- gets pc
+  instrs_ <- gets instrs
+  case nth instrs_ pc_ of
     Just instr -> do
-      debugStepProgram
-      debugRunProgram
+      debugStepProgram instr
+      lift $ putStr "\tPress ENTER to step forward...\n"
+      input <- lift $ getLine
+      if input == "q" || input == "Q" || input == "quit"
+        then return ()
+        else debugRunProgram
     Nothing -> return ()
 
 runProgram :: VmProgram ()
