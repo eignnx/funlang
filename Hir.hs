@@ -7,7 +7,7 @@ where
 
 import qualified Intr
 
-newtype Lbl = Lbl Int
+data Lbl = Lbl Int | HereLbl
   deriving (Show, Eq, Ord)
 
 instance Num Lbl where
@@ -47,6 +47,7 @@ data Instr
   | Jmp Lbl
   | Label Lbl
   | Intrinsic Intr.Intrinsic
-  | NewFrame -- Allocates a new call frame, sets it as current frame
-  | Param -- Pop TOS, stores it in current call frame.
+  | Call Int -- `Call n` calls the TOS function pointer with the remaining `n`
+             -- TOS-values as args
+  | Ret -- Jump back to return address
   deriving (Show)

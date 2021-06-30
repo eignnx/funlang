@@ -48,8 +48,12 @@ instance Compile Ast.Item where
   compile (Ast.Def name params body) = do
     lbl <- fresh
     define name lbl
+    let paramBindings = map Hir.Store (reverse params)
     body' <- compile body
-    return $ Hir.Label lbl : body'
+    return $  [Hir.Label lbl] -- Label the function.
+           ++ paramBindings -- First thing we do is store args (from stack) in memory.
+           ++ body' -- Then run the body of the function.
+           ++ [Hir.Ret] -- At the end of every function MUST be a return instr.
 
 instance Compile Ast.Stmt where
   compile Ast.Skip              = return []
@@ -109,20 +113,20 @@ instance Compile Ast.Expr where
     op' <- compile op
     -- NOTE: you gotta reverse these args below!
     return $ y' ++ x' ++ op'
+
   compile (Ast.Call fn args) = do
-    args' <- mapM compile args
-    let args'' = map (Hir.Param :) args'
-    -- instrs <- (compile args) $ \arg -> do
-    --   return Add
-    return []
+    args' <- compile args -- Using `instance Compile a => Compile [a]`
+    fn' <- compile fn
+    let argC = length args
+    return $  [Hir.Const (Hir.VLbl Hir.HereLbl)] -- Code to push the return address
+           ++ args' -- Code to push the arguments
+           ++ fn' -- Code to load the function pointer
+           ++ [Hir.Call argC]
 
   compile (Ast.Intrinsic pos name args) = do
     args' <- mapM compile args
-    return $ join args' ++ [Hir.Intrinsic op]
-   where
-    op = case name of
-      "print" -> Intr.Print
-      "here"  -> Intr.Here pos
+    let intr = Intr.fromName name pos
+    return $ join args' ++ [Hir.Intrinsic intr]
 
 instance Compile Ast.UnaryOp where
   compile Ast.Not = return [Hir.Not]

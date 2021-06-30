@@ -1,7 +1,7 @@
 # fib[n] = fib[n-1] + fib[n-2]
 
 def main[] do
-  n = 100;
+  n = 10;
   i = 1;
   j = 0;
   intr.here[];

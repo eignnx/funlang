@@ -1,5 +1,5 @@
 module Lir
-  ( InstrAddr
+  ( InstrAddr(..)
   , Value(..)
   , displayValue
   , Instr(..)
@@ -54,4 +54,6 @@ data Instr
   | JmpIfFalse InstrAddr
   | Jmp InstrAddr
   | Intrinsic Intr.Intrinsic
+  | Call Int
+  | Ret -- Jump back to return address
   deriving (Show)

@@ -11,8 +11,10 @@ import qualified Data.Map.Strict               as M
 -------------------------TRANSLATING FROM Hir.Instr------------------
 
 hirToLir :: [Hir.Instr] -> [Lir.Instr]
-hirToLir instrs = map (translateInstr labels) instrs
-  where labels = findLbls instrs
+hirToLir instrs = zipWith (translateInstr labels) indices instrs
+  where
+    indices = [Lir.InstrAddr x | x <- [0..]]
+    labels = findLbls instrs
 
 -------------------------FIRST PASS--------------------------------
 type LblMap = M.Map Hir.Lbl Lir.InstrAddr
@@ -32,11 +34,11 @@ findLbls instrs = go instrs 0 M.empty
 --
 -- Does the translation given a complete map of labels-to-instrIdx's. 
 --
-translateInstr :: LblMap -> Hir.Instr -> Lir.Instr
-translateInstr labels instr = case instr of
+translateInstr :: LblMap -> Lir.InstrAddr -> Hir.Instr -> Lir.Instr
+translateInstr labels instrIdx instr = case instr of
   Hir.Load  var       -> Lir.Load var
   Hir.Store var       -> Lir.Store var
-  Hir.Const val       -> Lir.Const $ translateValue labels val
+  Hir.Const val       -> Lir.Const $ translateValue labels instrIdx val
   Hir.Dup             -> Lir.Dup
   Hir.Over            -> Lir.Over
   Hir.Rot             -> Lir.Rot
@@ -55,17 +57,25 @@ translateInstr labels instr = case instr of
   Hir.JmpIfFalse lbl  -> translateJmp lbl Lir.JmpIfFalse labels
   Hir.Jmp        lbl  -> translateJmp lbl Lir.Jmp labels
   Hir.Intrinsic  intr -> Lir.Intrinsic intr
+  Hir.Call       argC -> Lir.Call argC
+  Hir.Ret             -> Lir.Ret
 
-translateValue :: LblMap -> Hir.Value -> Lir.Value
-translateValue labels hirVal =
+translateValue :: LblMap
+               -> Lir.InstrAddr -- The index of the current instruction the Lir code list.
+               -> Hir.Value
+               -> Lir.Value
+translateValue labels instrIdx hirVal =
   case hirVal of
     Hir.VInt x -> Lir.VInt x
     Hir.VBool x -> Lir.VBool x
     Hir.VString x -> Lir.VString x
+    Hir.VLbl Hir.HereLbl ->
+      Lir.VInstrAddr instrIdx
     Hir.VLbl lbl ->
       case M.lookup lbl labels of
         Just instrAddr -> Lir.VInstrAddr instrAddr
         Nothing -> error $ "Internal Compilation Error: Unknown label: " ++ show lbl
+      
 
 translateJmp :: Hir.Lbl
              -> (Lir.InstrAddr -> Lir.Instr)

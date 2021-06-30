@@ -1,5 +1,6 @@
 module Vm
   ( execVmProgram
+  , debugExecVmProgram
   , Stack
   , Memory
   , VmState
@@ -14,6 +15,8 @@ import qualified Data.Map.Strict               as M
 import           Control.Monad                  ( unless )
 import           Control.Monad.Reader
 import           Control.Monad.State
+
+import qualified Debug.Trace as Debug
 
 type Stack = [Lir.Value]
 type Memory = [M.Map String Lir.Value]
@@ -48,6 +51,13 @@ popBool = do
   val <- pop
   let Lir.VBool x = val
   return x
+
+popInstrAddr :: VmProgram Lir.InstrAddr
+popInstrAddr = do
+  val <- pop
+  case val of
+    Lir.VInstrAddr x -> return x
+    other -> error $ "Interal Vm Error: Expected VInstrAddr, got: " ++ show other
 
 push :: Lir.Value -> VmProgram ()
 push value = do
@@ -149,9 +159,27 @@ stepVm instr = do
       unless b $
                  -- we always incr pc, so goto idx - 1
                  setPc (idx - 1)
-    Lir.Nop -> do
-      return ()
+    Lir.Nop -> return ()
     Lir.Intrinsic intr -> runIntrinsic intr
+    -- Assume stack is set up properly beforehand.
+    -- Stack should look like this:
+    --  | <the function's InstrAddr>   <-- TOS
+    --  | <arg n>
+    --  | <arg n-1>
+    --  | ...
+    --  | <arg 2>
+    --  | <arg 1>
+    --  | <return address>
+    Lir.Call argC -> do
+      fnAddr <- popInstrAddr
+      setPc (fnAddr - 1)
+      s <- gets stack
+      let () = Debug.trace ("stack = " ++ show s) ()
+      return ()
+    Lir.Ret -> do
+      retAddr <- popInstrAddr
+      setPc (retAddr - 1)
+      return ()
 
 runIntrinsic :: Intr.Intrinsic -> VmProgram ()
 runIntrinsic op = case op of
@@ -160,24 +188,8 @@ runIntrinsic op = case op of
     lift $ Lir.displayValue x
   Intr.Here pos -> do
     lift $ putStrLn ("intr.here[] at " ++ show pos)
-
-testProgram =
-  [ Lir.Const (Lir.VInt 0)
-  , Lir.Store "x"
-  , Lir.Load "x" -- <<<
-  , Lir.Intrinsic Intr.Print
-  , Lir.Load "x"
-  , Lir.Const (Lir.VInt 1)
-  , Lir.Add
-  , Lir.Store "x"
-  , Lir.Load "x"
-  , Lir.Const (Lir.VInt 5)
-  , Lir.Gt
-  , Lir.JmpIfFalse 13
-  , Lir.Jmp 2
-  , Lir.Const (Lir.VBool True) -- <<<
-  , Lir.Intrinsic Intr.Print
-  ]
+  Intr.Exit -> do
+    setPc (-1)
 
 nth :: (Ord i, Num i) => [a] -> i -> Maybe a
 nth _ n | n < 0 = Nothing
@@ -187,14 +199,31 @@ nth (_ : xs) n  = nth xs (n - 1)
 
 debugStepProgram :: VmProgram ()
 debugStepProgram = do
+  instrs_  <- gets instrs
+  pc_      <- gets pc
+  stack_   <- gets stack
+  memory_  <- gets memory
+  let Lir.InstrAddr pcNum = pc_
+  lift $ putStrLn $ "\tInstr #" ++ show pcNum ++ ": " ++ maybe "???" show (nth instrs_ pc_)
+  lift $ putStr "\tStack: "
+  lift $ print stack_
+  lift $ putStr "\tMemory: "
+  lift $ print memory_
+  lift $ putStr "\tPress ENTER to step forward...\n"
+  input <- lift $ getLine
+  if input == "q" || input == "Q" || input == "quit"
+    then error "VM: Quitting trace debugger..."
+    else Data.Foldable.mapM_ stepVm (nth instrs_ pc_)
+
+debugRunProgram :: VmProgram ()
+debugRunProgram = do
   pc1     <- gets pc
   instrs1 <- gets instrs
-  st      <- get
-  lift $ putChar '\t'
-  lift $ print st
-  lift $ putStr "\texecuting instr: "
-  lift $ print (nth instrs1 pc1)
-  Data.Foldable.mapM_ stepVm (nth instrs1 pc1)
+  case nth instrs1 pc1 of
+    Just instr -> do
+      debugStepProgram
+      debugRunProgram
+    Nothing -> return ()
 
 runProgram :: VmProgram ()
 runProgram = do
@@ -212,3 +241,6 @@ initState instrs =
 
 execVmProgram :: [Lir.Instr] -> IO VmState
 execVmProgram program = execStateT runProgram (initState program)
+
+debugExecVmProgram :: [Lir.Instr] -> IO VmState
+debugExecVmProgram program = execStateT debugRunProgram (initState program)
