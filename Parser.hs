@@ -1,73 +1,18 @@
-module Parser where
+module Parser
+  ( parseString
+  , parseSrc
+  , parseFile
+  )
+where
 
+import qualified Ast                  as Ast
 import           Control.Monad
 import           System.IO
 import           Text.Parsec
 import           Text.Parsec.String
 import           Text.Parsec.Expr
 import           Text.Parsec.Language
-import qualified Text.Parsec.Token as Token
-
-type Ast = [Item]
-
-data Item = Def String [String] Expr
-  deriving Show
-
-data BinOp
-  = ArithOp ArithOp
-  | BoolOp BoolOp
-  | RelOp RelOp
-  deriving (Show)
-
-data ArithOp
-  = Add
-  | Sub
-  | Mul
-  | Div
-  deriving (Show)
-
-data BoolOp
-  = And
-  | Or
-  | Xor
-  deriving (Show)
-
-data RelOp
-  = Gt
-  | Lt
-  | Eq
-  | Neq
-  deriving (Show)
-
-data Lit
-  = Bool Bool
-  | Int Integer
-  | String String
-  deriving (Show)
-
-data UnaryOp
-  = Not
-  | Neg
-  deriving (Show)
-
-data Expr
-  = Var String
-  | Literal Lit
-  | Unary UnaryOp Expr
-  | Binary BinOp Expr Expr
-  | Block [Stmt]
-  | Call Expr [Expr]
-  | Intrinsic SourcePos String [Expr]
-  deriving (Show)
-
-data Stmt
-  = Assign String Expr
-  | Ret Expr
-  | If Expr Stmt Stmt
-  | While Expr Stmt
-  | Skip
-  | Expr Expr
-  deriving (Show)
+import qualified Text.Parsec.Token    as Token
 
 languageDef = emptyDef
   { Token.commentStart    = "{#"
@@ -127,10 +72,10 @@ comma = Token.comma lexer
 
 -- Statements
 -- The main statement parser
-langParser :: Parser [Item]
+langParser :: Parser Ast.Ast
 langParser = whiteSpace >> many1 item
 
-item :: Parser Item
+item :: Parser Ast.Item
 item = def
 
 -- ```
@@ -141,15 +86,15 @@ item = def
 -- OR
 -- ```
 -- def my-fn[arg1, arg2, ...] = ...expr...
-def :: Parser Item
+def :: Parser Ast.Item
 def = do
   reserved "def"
   name   <- identifier
   params <- brackets $ sepEndBy identifier (symbol ",")
   expr <- (reservedOp "=" *> expression) <|> blockExpr
-  return $ Def name params expr
+  return $ Ast.Def name params expr
 
-statement :: Parser Stmt
+statement :: Parser Ast.Stmt
 statement = ifStmt
          <|> whileStmt
          <|> skipStmt
@@ -157,117 +102,117 @@ statement = ifStmt
          <|> try assignStmt
          <|> exprStmt
 
-ifStmt :: Parser Stmt
+ifStmt :: Parser Ast.Stmt
 ifStmt = do
   reserved "if"
   cond <- expression
   reserved "then"
-  stmt1 <- (Expr . Block) <$> many statement
+  stmt1 <- (Ast.Expr . Ast.Block) <$> many statement
   reserved "else"
-  stmt2 <- (Expr . Block) <$> many statement
+  stmt2 <- (Ast.Expr . Ast.Block) <$> many statement
   reserved "end"
-  return $ If cond stmt1 stmt2
+  return $ Ast.If cond stmt1 stmt2
 
-whileStmt :: Parser Stmt
+whileStmt :: Parser Ast.Stmt
 whileStmt = do
   reserved "while"
   cond <- expression
-  stmt <- Expr <$> blockExpr
-  return $ While cond stmt
+  stmt <- Ast.Expr <$> blockExpr
+  return $ Ast.While cond stmt
 
-skipStmt :: Parser Stmt
-skipStmt = reserved "nop" *> semi *> return Skip
+skipStmt :: Parser Ast.Stmt
+skipStmt = reserved "nop" *> semi *> return Ast.Skip
 
-assignStmt :: Parser Stmt
-assignStmt = Assign <$> identifier <*> (reservedOp "=" *> expression) <* semi
+assignStmt :: Parser Ast.Stmt
+assignStmt = Ast.Assign <$> identifier <*> (reservedOp "=" *> expression) <* semi
 
-returnStmt :: Parser Stmt
-returnStmt = Ret <$> (reserved "ret" *> expression <* semi)
+returnStmt :: Parser Ast.Stmt
+returnStmt = Ast.Ret <$> (reserved "ret" *> expression <* semi)
 
-exprStmt :: Parser Stmt
-exprStmt = Expr <$> expression <* semi
+exprStmt :: Parser Ast.Stmt
+exprStmt = Ast.Expr <$> expression <* semi
 
 operators =
-  [ [ Prefix (reservedOp "-" >> return (Unary Neg))
-    , Prefix (reserved "not" >> return (Unary Not))
+  [ [ Prefix (reservedOp "-" >> return (Ast.Unary Ast.Neg))
+    , Prefix (reserved "not" >> return (Ast.Unary Ast.Not))
     ]
-  , [ Infix (reservedOp "*" >> return (Binary (ArithOp Mul))) AssocLeft
-    , Infix (reservedOp "/" >> return (Binary (ArithOp Div))) AssocLeft
+  , [ Infix (reservedOp "*" >> return (Ast.Binary (Ast.ArithOp Ast.Mul))) AssocLeft
+    , Infix (reservedOp "/" >> return (Ast.Binary (Ast.ArithOp Ast.Div))) AssocLeft
     ]
-  , [ Infix (reservedOp "+" >> return (Binary (ArithOp Add))) AssocLeft
-    , Infix (reservedOp "-" >> return (Binary (ArithOp Sub))) AssocLeft
+  , [ Infix (reservedOp "+" >> return (Ast.Binary (Ast.ArithOp Ast.Add))) AssocLeft
+    , Infix (reservedOp "-" >> return (Ast.Binary (Ast.ArithOp Ast.Sub))) AssocLeft
     ]
-  , [ Infix (reservedOp ">" >> return (Binary (RelOp Gt)))   AssocLeft
-    , Infix (reservedOp "<" >> return (Binary (RelOp Lt)))   AssocLeft
-    , Infix (reservedOp "==" >> return (Binary (RelOp Eq)))  AssocLeft
-    , Infix (reservedOp "!=" >> return (Binary (RelOp Neq))) AssocLeft
+  , [ Infix (reservedOp ">" >> return (Ast.Binary (Ast.RelOp Ast.Gt)))   AssocLeft
+    , Infix (reservedOp "<" >> return (Ast.Binary (Ast.RelOp Ast.Lt)))   AssocLeft
+    , Infix (reservedOp "==" >> return (Ast.Binary (Ast.RelOp Ast.Eq)))  AssocLeft
+    , Infix (reservedOp "!=" >> return (Ast.Binary (Ast.RelOp Ast.Neq))) AssocLeft
     ]
-  , [ Infix (reserved "and" >> return (Binary (BoolOp And))) AssocLeft
-    , Infix (reserved "or" >> return (Binary (BoolOp Or)))   AssocLeft
-    , Infix (reserved "xor" >> return (Binary (BoolOp Xor))) AssocLeft
+  , [ Infix (reserved "and" >> return (Ast.Binary (Ast.BoolOp Ast.And))) AssocLeft
+    , Infix (reserved "or" >> return (Ast.Binary (Ast.BoolOp Ast.Or)))   AssocLeft
+    , Infix (reserved "xor" >> return (Ast.Binary (Ast.BoolOp Ast.Xor))) AssocLeft
     ]
   ]
 
 -- NOTE: Function application syntax is left-recursive!
 -- That's why we gotta split things up into `termFirst`
 -- and `term`.
-term :: Parser Expr
+term :: Parser Ast.Expr
 term =  try nestedCalls
     <|> termFirst
 
 -- my-func[x, y][1, 2][a, b, c]
-nestedCalls :: Parser Expr
+nestedCalls :: Parser Ast.Expr
 nestedCalls = do
   head <- termFirst
   allArgs <- many1 arguments
-  return $ foldl Call head allArgs -- Build up all the calls
+  return $ foldl Ast.Call head allArgs -- Build up all the calls
 
-termFirst :: Parser Expr
-termFirst =  (Var <$> identifier)
+termFirst :: Parser Ast.Expr
+termFirst =  (Ast.Var <$> identifier)
          <|> intrinsicExpr
          <|> blockExpr
-         <|> (Literal <$> literal)
+         <|> (Ast.Literal <$> literal)
          <|> parens expression
 
 -- Expressions
-expression :: Parser Expr
+expression :: Parser Ast.Expr
 expression = buildExpressionParser operators term
 
-intrinsicExpr :: Parser Expr
+intrinsicExpr :: Parser Ast.Expr
 intrinsicExpr = do
   pos <- getPosition
   reserved "intr"
   dot
   name <- identifier
   args <- arguments
-  return $ Intrinsic pos name args
+  return $ Ast.Intrinsic pos name args
 
-callExpr :: Parser Expr
-callExpr = Call <$> expression <*> arguments
+callExpr :: Parser Ast.Expr
+callExpr = Ast.Call <$> expression <*> arguments
 
-arguments :: Parser [Expr]
+arguments :: Parser [Ast.Expr]
 arguments = brackets $ sepEndBy expression comma
 
-literal :: Parser Lit
+literal :: Parser Ast.Lit
 literal =
-  (Int <$> integer) <|> (Bool <$> boolean) <|> (String <$> stringLiteral)
+  (Ast.Int <$> integer) <|> (Ast.Bool <$> boolean) <|> (Ast.String <$> stringLiteral)
  where
   boolean =
     (reserved "true" >> return True) <|> (reserved "false" >> return False)
 
-blockExpr :: Parser Expr
-blockExpr = Block <$> (reserved "do" *> many statement <* reserved "end")
+blockExpr :: Parser Ast.Expr
+blockExpr = Ast.Block <$> (reserved "do" *> many statement <* reserved "end")
 
 -- REPL Helper Functions
-parseString :: String -> Ast
+parseString :: String -> Ast.Ast
 parseString = parseSrc "<string input>"
 
-parseSrc :: String -> String -> Ast
+parseSrc :: String -> String -> Ast.Ast
 parseSrc file src = case parse langParser file src of
   Left  e -> error $ show e
   Right r -> r
 
-parseFile :: String -> IO Ast
+parseFile :: String -> IO Ast.Ast
 parseFile file = do
   program <- readFile file
   case parse langParser file program of
