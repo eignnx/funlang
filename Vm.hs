@@ -22,10 +22,11 @@ type Stack = [Lir.Value]
 type Memory = [M.Map String Lir.Value]
 
 data VmState = VmState
-  { memory :: Memory
-  , stack  :: Stack
-  , pc     :: Lir.InstrAddr
-  , instrs :: [Lir.Instr]
+  { memory  :: Memory
+  , stack   :: Stack
+  , pc      :: Lir.InstrAddr
+  , instrs  :: [Lir.Instr]
+  , running :: Bool
   }
   deriving Show
 
@@ -231,7 +232,7 @@ runIntrinsic op = case op of
   Intr.Here pos -> do
     lift $ putStrLn ("intr.here[] at " ++ show pos)
   Intr.Exit -> do
-    setPc (-999)
+    modify $ \state -> state { running = False }
 
 nth :: (Ord i, Num i) => [a] -> i -> Maybe a
 nth _ n | n < 0 = Nothing
@@ -257,25 +258,29 @@ debugRunProgram :: VmProgram ()
 debugRunProgram = do
   pc_     <- gets pc
   instrs_ <- gets instrs
-  case nth instrs_ pc_ of
-    Just instr -> do
-      debugStepProgram instr
-      lift $ putStr "\tPress ENTER to step forward...\n"
-      input <- lift $ getLine
-      if input == "q" || input == "Q" || input == "quit"
-        then return ()
-        else debugRunProgram
-    Nothing -> return ()
+  vmState <- get
+  when (running vmState) $
+    case nth instrs_ pc_ of
+      Just instr -> do
+        debugStepProgram instr
+        lift $ putStr "\tPress ENTER to step forward...\n"
+        input <- lift $ getLine
+        if input == "q" || input == "Q" || input == "quit"
+          then return ()
+          else debugRunProgram
+      Nothing -> error $ "VM: Illegal instruction address: " ++ show pc_
 
 runProgram :: VmProgram ()
 runProgram = do
   pc_     <- gets pc
   instrs_ <- gets instrs
-  case nth instrs_ pc_ of
-    Just instr -> do
-      stepVm instr
-      runProgram
-    Nothing -> return ()
+  vmState <- get
+  when (running vmState) $
+    case nth instrs_ pc_ of
+      Just instr -> do
+        stepVm instr
+        runProgram
+      Nothing -> error $ "VM: Illegal instruction address: " ++ show pc_
 
 initState :: [Lir.Instr] -> VmState
 initState instrs =
@@ -283,6 +288,7 @@ initState instrs =
           , stack = []
           , pc = 0
           , instrs = instrs
+          , running = True
           }
 
 execVmProgram :: [Lir.Instr] -> IO VmState
