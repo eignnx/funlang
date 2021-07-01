@@ -67,10 +67,13 @@ push value = do
 load :: String -> VmProgram ()
 load var = do
   state <- get
-  let (frame : _) = memory state
-  case M.lookup var frame of
-    Just val -> push val
-    Nothing  -> error ("Unbound variable \"" ++ var ++ "\"")
+  push $ findInFrames $ memory state
+    where
+      findInFrames [] = error ("Unbound variable \"" ++ var ++ "\"")
+      findInFrames (frame:frames) =
+        case M.lookup var frame of
+             Just val -> val
+             Nothing  -> findInFrames frames
 
 store :: String -> VmProgram ()
 store var = do
@@ -88,6 +91,18 @@ incrPc :: VmProgram ()
 incrPc = do
   oldPc <- gets pc
   setPc (oldPc + 1)
+
+pushNewFrame :: VmProgram ()
+pushNewFrame = do
+  oldMem <- gets memory
+  let newMem = M.empty : oldMem
+  modify $ \state -> state { memory = newMem }
+
+popMemFrame :: VmProgram ()
+popMemFrame = do
+  oldMem <- gets memory
+  let (_ : newMem) = oldMem
+  modify $ \state -> state { memory = newMem }
 
 stepIntBinOp :: (Int -> Int -> Int) -> VmProgram ()
 stepIntBinOp op = do
@@ -190,9 +205,11 @@ stepVm instr = do
       push $ Lir.VInstrAddr retAddr
       -- Perform the jump.
       setPc (fnAddr - 1)
+      pushNewFrame
       return ()
     Lir.Ret -> do
       retAddr <- popInstrAddr
+      popMemFrame
       setPc (retAddr - 1)
       return ()
 

@@ -49,5 +49,5 @@ def main[] do
   name = "Quincy"; # Local variable.
   greet["Digger"];
   greet["Pippen"];
-  intr.print[name];
+  intr.print[name]; # Should print "Quincy"
 end

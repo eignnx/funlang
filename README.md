@@ -26,7 +26,8 @@ end
 ## Features/TODO
 - [X] Compile a (somewhat) high-level language down to bytecode that can be run on a virtual machine
     - [X] Implement basic operations, and control flow statements
-    - [ ] Implement function calls
+    - [X] Implement function calls
+    - [ ] Implement lexical scoping for blocks
     - [ ] Implement closures
 - [ ] Add a bidirectional type-checking algorithm
 - [ ] Add algebraic data types
