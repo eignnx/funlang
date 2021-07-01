@@ -7,7 +7,7 @@ where
 
 import qualified Intr
 
-data Lbl = Lbl Int | HereLbl
+data Lbl = Lbl Int
   deriving (Show, Eq, Ord)
 
 instance Num Lbl where

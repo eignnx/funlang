@@ -11,7 +11,7 @@ import qualified Data.Map.Strict               as M
 -------------------------TRANSLATING FROM Hir.Instr------------------
 
 hirToLir :: [Hir.Instr] -> [Lir.Instr]
-hirToLir instrs = zipWith (translateInstr labels) indices instrs
+hirToLir instrs = map (translateInstr labels) instrs
   where
     indices = [Lir.InstrAddr x | x <- [0..]]
     labels = findLbls instrs
@@ -34,11 +34,11 @@ findLbls instrs = go instrs 0 M.empty
 --
 -- Does the translation given a complete map of labels-to-instrIdx's. 
 --
-translateInstr :: LblMap -> Lir.InstrAddr -> Hir.Instr -> Lir.Instr
-translateInstr labels instrIdx instr = case instr of
+translateInstr :: LblMap -> Hir.Instr -> Lir.Instr
+translateInstr labels instr = case instr of
   Hir.Load  var       -> Lir.Load var
   Hir.Store var       -> Lir.Store var
-  Hir.Const val       -> Lir.Const $ translateValue labels instrIdx val
+  Hir.Const val       -> Lir.Const $ translateValue labels val
   Hir.Dup             -> Lir.Dup
   Hir.Over            -> Lir.Over
   Hir.Rot             -> Lir.Rot
@@ -63,16 +63,13 @@ translateInstr labels instrIdx instr = case instr of
   Hir.Ret             -> Lir.Ret
 
 translateValue :: LblMap
-               -> Lir.InstrAddr -- The index of the current instruction the Lir code list.
                -> Hir.Value
                -> Lir.Value
-translateValue labels instrIdx hirVal =
+translateValue labels hirVal =
   case hirVal of
     Hir.VInt x -> Lir.VInt x
     Hir.VBool x -> Lir.VBool x
     Hir.VString x -> Lir.VString x
-    Hir.VLbl Hir.HereLbl ->
-      Lir.VInstrAddr instrIdx
     Hir.VLbl lbl ->
       case M.lookup lbl labels of
         Just instrAddr -> Lir.VInstrAddr instrAddr
