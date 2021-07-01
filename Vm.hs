@@ -138,6 +138,12 @@ stepVm instr = do
       push c
       push a
       push b
+    -- [a, b, ...] -> [b, a, ...]
+    Lir.Swap -> do
+      a <- pop
+      b <- pop
+      push a
+      push b
     Lir.Add -> stepIntBinOp (+)
     Lir.Sub -> stepIntBinOp (-)
     Lir.Mul -> stepIntBinOp (*)
@@ -169,12 +175,21 @@ stepVm instr = do
     --  | ...
     --  | <arg 2>
     --  | <arg 1>
+    -- After running Lir.Call, stack should like like this:
     --  | <return address>
+    --  | <arg n>
+    --  | <arg n-1>
+    --  | ...
+    --  | <arg 2>
+    --  | <arg 1>
     Lir.Call argC -> do
       fnAddr <- popInstrAddr
+      -- Store the return address above all the args.
+      pc_ <- gets pc
+      let retAddr = pc_ + 1 -- Return to the NEXT instr.
+      push $ Lir.VInstrAddr retAddr
+      -- Perform the jump.
       setPc (fnAddr - 1)
-      s <- gets stack
-      let () = Debug.trace ("stack = " ++ show s) ()
       return ()
     Lir.Ret -> do
       retAddr <- popInstrAddr
@@ -189,7 +204,7 @@ runIntrinsic op = case op of
   Intr.Here pos -> do
     lift $ putStrLn ("intr.here[] at " ++ show pos)
   Intr.Exit -> do
-    setPc (-1)
+    setPc (-999)
 
 nth :: (Ord i, Num i) => [a] -> i -> Maybe a
 nth _ n | n < 0 = Nothing
@@ -227,9 +242,9 @@ debugRunProgram = do
 
 runProgram :: VmProgram ()
 runProgram = do
-  pc1     <- gets pc
-  instrs1 <- gets instrs
-  case nth instrs1 pc1 of
+  pc_     <- gets pc
+  instrs_ <- gets instrs
+  case nth instrs_ pc_ of
     Just instr -> do
       stepVm instr
       runProgram
@@ -237,7 +252,11 @@ runProgram = do
 
 initState :: [Lir.Instr] -> VmState
 initState instrs =
-  VmState { memory = [M.empty], stack = [], pc = 0, instrs = instrs }
+  VmState { memory = [M.empty]
+          , stack = []
+          , pc = 0
+          , instrs = instrs
+          }
 
 execVmProgram :: [Lir.Instr] -> IO VmState
 execVmProgram program = execStateT runProgram (initState program)

@@ -39,6 +39,7 @@ data Instr
   | Dup -- Stack operations
   | Over -- "
   | Rot -- "
+  | Swap -- "
   | Add
   | Sub
   | Mul

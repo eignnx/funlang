@@ -48,7 +48,8 @@ instance Compile Ast.Item where
   compile (Ast.Def name params body) = do
     lbl <- fresh
     define name lbl
-    let paramBindings = map Hir.Store (reverse params)
+    -- We gotta use Hir.Swap before store because the RETURN ADDRESS is on TOS!
+    let paramBindings = reverse params >>= \param -> [Hir.Swap, Hir.Store param]
     let prologue = paramBindings -- First thing we do is store args (from stack) in memory.
     body' <- compile body
     let epilogue = if name == "main"
@@ -122,8 +123,7 @@ instance Compile Ast.Expr where
     args' <- compile args -- Using `instance Compile a => Compile [a]`
     fn' <- compile fn
     let argC = length args
-    return $  [Hir.Const (Hir.VLbl Hir.HereLbl)] -- Code to push the return address
-           ++ args' -- Code to push the arguments
+    return $ args' -- Code to push the arguments
            ++ fn' -- Code to load the function pointer
            ++ [Hir.Call argC]
 
@@ -170,10 +170,17 @@ instance Compile Ast.RelOp where
     Ast.Eq  -> [Hir.Eq]
     Ast.Neq -> [Hir.Eq, Hir.Not]
 
+addEntryPointJump :: [Hir.Instr] -> [(String, Hir.Lbl)] -> [Hir.Instr]
+addEntryPointJump hir defs = globalDefs ++ entryPointJump ++ hir
+  where globalDefs = defs >>= (\(name, lbl) -> [Hir.Const (Hir.VLbl lbl), Hir.Store name])
+        entryPointJump = [Hir.Jmp mainLbl]
+        Just mainLbl = lookup "main" defs
+
 initialCState = CState { lbl_ = Hir.Lbl 0, defs_ = [] }
 
 astToHir :: Compile a => a -> [Hir.Instr]
-astToHir ast = evalState (compile ast) initialCState
+astToHir ast = addEntryPointJump hir defs
+  where (hir, CState { defs_ = defs }) = runCompilation ast
 
 runCompilation :: Compile a => a -> ([Hir.Instr], CState)
 runCompilation ast = runState (compile ast) initialCState

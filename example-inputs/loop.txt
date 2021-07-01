@@ -1,4 +1,0 @@
-while true do
-    @print[111];
-end;
-@print[222];
