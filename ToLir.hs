@@ -54,6 +54,7 @@ translateInstr labels instrIdx instr = case instr of
   Hir.Eq              -> Lir.Eq
   Hir.Gt              -> Lir.Gt
   Hir.Lt              -> Lir.Lt
+  Hir.Concat          -> Lir.Concat
   Hir.Label      lbl  -> Lir.Nop -- Labels are translated to no-ops.
   Hir.JmpIfFalse lbl  -> translateJmp lbl Lir.JmpIfFalse labels
   Hir.Jmp        lbl  -> translateJmp lbl Lir.Jmp labels

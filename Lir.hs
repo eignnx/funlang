@@ -51,6 +51,7 @@ data Instr
   | Eq
   | Gt
   | Lt
+  | Concat
   | Nop -- Used to replace labels
   | JmpIfFalse InstrAddr
   | Jmp InstrAddr

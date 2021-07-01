@@ -52,6 +52,12 @@ popBool = do
   let Lir.VBool x = val
   return x
 
+popString :: VmProgram String
+popString = do
+  val <- pop
+  let Lir.VString x = val
+  return x
+
 popInstrAddr :: VmProgram Lir.InstrAddr
 popInstrAddr = do
   val <- pop
@@ -174,6 +180,10 @@ stepVm instr = do
     Lir.Not -> do
       b <- popBool
       push (Lir.VBool (not b))
+    Lir.Concat -> do
+      a <- popString
+      b <- popString
+      push $ Lir.VString $ a ++ b
     Lir.Jmp        idx -> setPc (idx - 1)
     Lir.JmpIfFalse idx -> do
       b <- popBool

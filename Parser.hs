@@ -49,6 +49,7 @@ languageDef = emptyDef
                             , ">"
                             , "=="
                             , "!="
+                            , "++"
                             ]
   }
 
@@ -141,6 +142,7 @@ operators =
     ]
   , [ Infix (reservedOp "+" >> return (Ast.Binary (Ast.ArithOp Ast.Add))) AssocLeft
     , Infix (reservedOp "-" >> return (Ast.Binary (Ast.ArithOp Ast.Sub))) AssocLeft
+    , Infix (reservedOp "++" >> return (Ast.Binary (Ast.OtherOp Ast.Concat))) AssocLeft
     ]
   , [ Infix (reservedOp ">" >> return (Ast.Binary (Ast.RelOp Ast.Gt)))   AssocLeft
     , Infix (reservedOp "<" >> return (Ast.Binary (Ast.RelOp Ast.Lt)))   AssocLeft

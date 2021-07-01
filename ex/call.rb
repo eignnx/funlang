@@ -41,8 +41,7 @@ def greet[name] do
 end
 
 def say2[thing1, thing2] do
-  intr.print[thing1];
-  intr.print[thing2];
+  intr.print[thing1 ++ thing2];
 end
 
 def main[] do

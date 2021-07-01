@@ -5,6 +5,7 @@ module Ast
   , ArithOp(..)
   , BoolOp(..)
   , RelOp(..)
+  , OtherOp(..)
   , Lit(..)
   , UnaryOp(..)
   , Expr(..)
@@ -23,6 +24,7 @@ data BinOp
   = ArithOp ArithOp
   | BoolOp BoolOp
   | RelOp RelOp
+  | OtherOp OtherOp
   deriving (Show)
 
 data ArithOp
@@ -43,6 +45,10 @@ data RelOp
   | Lt
   | Eq
   | Neq
+  deriving (Show)
+
+data OtherOp
+  = Concat
   deriving (Show)
 
 data Lit

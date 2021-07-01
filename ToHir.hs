@@ -100,6 +100,9 @@ instance Compile Ast.ArithOp where
     Ast.Mul -> [Hir.Mul]
     Ast.Div -> [Hir.Div]
 
+instance Compile Ast.OtherOp where
+  compile Ast.Concat = return [Hir.Concat]
+
 instance Compile Ast.Expr where
   compile (Ast.Block []            ) = return []
   compile (Ast.Block (stmt : stmts)) = do
@@ -142,9 +145,10 @@ valueFromLit (Ast.Bool   x) = Hir.VBool x
 valueFromLit (Ast.String x) = Hir.VString x
 
 instance Compile Ast.BinOp where
-  compile (Ast.ArithOp op) = compile op
-  compile (Ast.BoolOp  op) = compile op
-  compile (Ast.RelOp   op) = compile op
+  compile (Ast.ArithOp   op) = compile op
+  compile (Ast.BoolOp    op) = compile op
+  compile (Ast.RelOp     op) = compile op
+  compile (Ast.OtherOp   op) = compile op
 
 instance Compile Ast.BoolOp where
   compile op = return $ case op of
