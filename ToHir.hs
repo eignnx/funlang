@@ -91,7 +91,9 @@ instance Compile Ast.Stmt where
       ++ body'
       ++ [Hir.Jmp top]
       ++ [Hir.Label end]
-  compile (Ast.Expr expr) = compile expr
+  compile (Ast.Expr expr) = do
+    e <- compile expr
+    return $ e ++ [Hir.Pop] -- Gotta pop unused value off the TOS.
 
 instance Compile Ast.ArithOp where
   compile op = return $ case op of

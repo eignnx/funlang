@@ -40,6 +40,7 @@ data Instr
   | Over -- "
   | Rot -- "
   | Swap -- "
+  | Pop -- "
   | Add
   | Sub
   | Mul

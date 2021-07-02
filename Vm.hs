@@ -166,6 +166,9 @@ stepVm instr = do
       b <- pop
       push a
       push b
+    Lir.Pop -> do
+      _ <- pop
+      return ()
     Lir.Add -> stepIntBinOp (+)
     Lir.Sub -> stepIntBinOp (-)
     Lir.Mul -> stepIntBinOp (*)
