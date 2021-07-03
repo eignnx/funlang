@@ -43,6 +43,7 @@ translateInstr labels instr = case instr of
   Hir.Over            -> Lir.Over
   Hir.Rot             -> Lir.Rot
   Hir.Swap            -> Lir.Swap
+  Hir.Pop             -> Lir.Pop
   Hir.Add             -> Lir.Add
   Hir.Sub             -> Lir.Sub
   Hir.Mul             -> Lir.Mul
