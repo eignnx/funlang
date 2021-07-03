@@ -47,13 +47,6 @@ getOpts = do
                     , traceVm = traceVm
                     } 
 
-getDebugMode :: IO Bool
-getDebugMode = do
-  args <- getArgs
-  case args of
-    [filename, "-t"] -> return True
-    [filename, "--trace-compilation"] -> return True
-
 main :: IO ()
 main = do
   opts <- getOpts
