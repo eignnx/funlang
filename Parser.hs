@@ -22,6 +22,7 @@ languageDef = emptyDef
   , Token.identStart      = letter
   , Token.identLetter     = alphaNum <|> oneOf "-"
   , Token.reservedNames   = [ "def"
+                            , "let"
                             , "if"
                             , "then"
                             , "else"
@@ -100,6 +101,7 @@ statement = ifStmt
          <|> whileStmt
          <|> skipStmt
          <|> returnStmt
+         <|> letStmt
          <|> try assignStmt
          <|> exprStmt
 
@@ -123,6 +125,9 @@ whileStmt = do
 
 skipStmt :: Parser Ast.Stmt
 skipStmt = reserved "nop" *> semi *> return Ast.Skip
+
+letStmt :: Parser Ast.Stmt
+letStmt = Ast.Let <$> (reserved "let" *> identifier) <*> (reservedOp "=" *> expression) <* semi
 
 assignStmt :: Parser Ast.Stmt
 assignStmt = Ast.Assign <$> identifier <*> (reservedOp "=" *> expression) <* semi

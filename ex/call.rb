@@ -52,7 +52,7 @@ def say2[thing1, thing2] do
 end
 
 def main[] do
-  name = "Quincy"; # Local variable.
+  let name = "Quincy"; # Local variable.
   greet["Digger"];
   greet["Pippen"];
   intr.print[name]; # Should print "Quincy"
