@@ -52,9 +52,7 @@ instance Compile Ast.Item where
     let paramBindings = reverse params >>= \param -> [Hir.Swap, Hir.Store param]
     let prologue = paramBindings -- First thing we do is store args (from stack) in memory.
     body' <- compile body
-    let epilogue = if name == "main"
-                      then [Hir.Intrinsic Intr.Exit]
-                      else [Hir.Ret] -- At the end of (almost) every function MUST be a return instr.
+    let epilogue = [Hir.Ret] -- At the end of every function MUST be a return instr.
     return $  [Hir.Label lbl] -- Label the function.
            ++ prologue -- First run the prologue.
            ++ body' -- Then run the body of the function.
