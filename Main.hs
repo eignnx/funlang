@@ -93,7 +93,7 @@ showAssoc assoc = unlines $ ["{"] ++ pairs ++ ["}"]
     formatter (key, val) = "\t" ++ show key ++ " = " ++ show val
 
 printAst :: Ast.Ast -> IO ()
-printAst ast = putStrLn $ showAssoc (ToHir.getDefs ast) 
+printAst ast = putStrLn $ showAssoc (ToHir.getDefs ast) ++ show ast
 
 printHir :: [Hir.Instr] -> IO ()
 printHir hir = putStrLn $ unlines $ map show hir
