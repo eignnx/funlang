@@ -93,6 +93,7 @@ instance Compile Ast.Stmt where
     e <- compile expr
     return $ e ++ case expr of
       Ast.Block _ -> [] -- Skip the pop if it's a block expression.
+      Ast.Call _ _ -> [] -- TODO: TEMPORARY! Skip the pop if it's a call expression.
       _ -> [Hir.Pop] -- Gotta pop unused value off the TOS.
 
 instance Compile Ast.ArithOp where
