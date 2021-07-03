@@ -46,6 +46,7 @@ data Instr
   | Gt
   | Lt
   | Concat
+  | Nop
   | JmpIfFalse Lbl
   | Jmp Lbl
   | Label Lbl

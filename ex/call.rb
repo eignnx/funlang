@@ -55,5 +55,5 @@ def main[] do
   let name = "Quincy"; # Local variable.
   greet["Digger"];
   greet["Pippen"];
-  intr.print[name]; # Should print "Quincy"
+  intr.print[name] # Should print "Quincy"
 end
