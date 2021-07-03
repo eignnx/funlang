@@ -9,7 +9,6 @@ module Ast
   , Lit(..)
   , UnaryOp(..)
   , Expr(..)
-  , Stmt(..)
   )
 where
 
@@ -67,17 +66,13 @@ data Expr
   | Literal Lit
   | Unary UnaryOp Expr
   | Binary BinOp Expr Expr
-  | Block [Stmt]
+  | Block [Expr]
   | Call Expr [Expr]
   | Intrinsic Parsec.SourcePos String [Expr]
-  deriving (Show)
-
-data Stmt
-  = Let String Expr
+  | Let String Expr
   | Assign String Expr
   | Ret Expr
-  | If Expr Stmt Stmt
-  | While Expr Stmt
-  | Skip
-  | Expr Expr
+  | If Expr Expr Expr
+  | While Expr Expr
+  | Nop
   deriving (Show)

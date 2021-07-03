@@ -13,6 +13,7 @@ import           Text.Parsec.String
 import           Text.Parsec.Expr
 import           Text.Parsec.Language
 import qualified Text.Parsec.Token    as Token
+import           Debug.Trace          ( trace )
 
 languageDef = emptyDef
   { Token.commentStart    = "{#"
@@ -93,50 +94,41 @@ def = do
   reserved "def"
   name   <- identifier
   params <- brackets $ sepEndBy identifier (symbol ",")
-  expr <- (reservedOp "=" *> expression) <|> blockExpr
-  return $ Ast.Def name params expr
+  body   <- exprBody <|> blockBody
+  return $ Ast.Def name params body
+    where
+      blockBody = blockExpr
+      exprBody = reservedOp "=" *> expression
 
-statement :: Parser Ast.Stmt
-statement = ifStmt
-         <|> whileStmt
-         <|> skipStmt
-         <|> returnStmt
-         <|> letStmt
-         <|> try assignStmt
-         <|> exprStmt
-
-ifStmt :: Parser Ast.Stmt
-ifStmt = do
+ifExpr :: Parser Ast.Expr
+ifExpr = do
   reserved "if"
   cond <- expression
   reserved "then"
-  stmt1 <- (Ast.Expr . Ast.Block) <$> many statement
+  yesBody <- expression
   reserved "else"
-  stmt2 <- (Ast.Expr . Ast.Block) <$> many statement
+  noBody <- expression
   reserved "end"
-  return $ Ast.If cond stmt1 stmt2
+  return $ Ast.If cond yesBody noBody
 
-whileStmt :: Parser Ast.Stmt
-whileStmt = do
+whileExpr :: Parser Ast.Expr
+whileExpr = do
   reserved "while"
   cond <- expression
-  stmt <- Ast.Expr <$> blockExpr
-  return $ Ast.While cond stmt
+  body <- expression
+  return $ Ast.While cond body
 
-skipStmt :: Parser Ast.Stmt
-skipStmt = reserved "nop" *> semi *> return Ast.Skip
+nopExpr :: Parser Ast.Expr
+nopExpr = reserved "nop" *> return Ast.Nop
 
-letStmt :: Parser Ast.Stmt
-letStmt = Ast.Let <$> (reserved "let" *> identifier) <*> (reservedOp "=" *> expression) <* semi
+letExpr :: Parser Ast.Expr
+letExpr = Ast.Let <$> (reserved "let" *> identifier) <*> (reservedOp "=" *> expression)
 
-assignStmt :: Parser Ast.Stmt
-assignStmt = Ast.Assign <$> identifier <*> (reservedOp "=" *> expression) <* semi
+assignExpr :: Parser Ast.Expr
+assignExpr = Ast.Assign <$> identifier <*> (reservedOp "=" *> expression)
 
-returnStmt :: Parser Ast.Stmt
-returnStmt = Ast.Ret <$> (reserved "ret" *> expression <* semi)
-
-exprStmt :: Parser Ast.Stmt
-exprStmt = Ast.Expr <$> expression <* semi
+returnExpr :: Parser Ast.Expr
+returnExpr = Ast.Ret <$> (reserved "ret" *> expression)
 
 operators =
   [ [ Prefix (reservedOp "-" >> return (Ast.Unary Ast.Neg))
@@ -174,16 +166,38 @@ nestedCalls = do
   allArgs <- many1 arguments
   return $ foldl Ast.Call head allArgs -- Build up all the calls
 
+varExpr :: Parser Ast.Expr
+varExpr = Ast.Var <$> identifier
+
+literalExpr :: Parser Ast.Expr
+literalExpr = Ast.Literal <$> literal
+
 termFirst :: Parser Ast.Expr
-termFirst =  (Ast.Var <$> identifier)
-         <|> intrinsicExpr
-         <|> blockExpr
-         <|> (Ast.Literal <$> literal)
-         <|> parens expression
+termFirst =  semiEndedTerm <|> endEndedTerm
+
+
+semiEndedTerm =  intrinsicExpr
+             <|> parens expression
+             <|> nopExpr
+             <|> returnExpr
+             <|> letExpr
+             <|> literalExpr
+             <|> try assignExpr
+             <|> varExpr
+
+endEndedTerm =  blockExpr
+            <|> ifExpr
+            <|> whileExpr
+
+semiEndedExpr = try nestedCalls <|> semiEndedTerm 
+endEndedExpr = endEndedTerm
 
 -- Expressions
 expression :: Parser Ast.Expr
 expression = buildExpressionParser operators term
+
+terminatedExpr :: Parser Ast.Expr
+terminatedExpr = (semiEndedExpr <* semi) <|> endEndedExpr
 
 intrinsicExpr :: Parser Ast.Expr
 intrinsicExpr = do
@@ -208,7 +222,15 @@ literal =
     (reserved "true" >> return True) <|> (reserved "false" >> return False)
 
 blockExpr :: Parser Ast.Expr
-blockExpr = Ast.Block <$> (reserved "do" *> many statement <* reserved "end")
+blockExpr = do
+  reserved "do"
+  es <- many $ try terminatedExpr
+  e <- optionMaybe expression
+  reserved "end"
+  let exprs = case e of
+                Just expr -> es ++ [expr]
+                Nothing -> es
+  return $ Ast.Block exprs
 
 -- REPL Helper Functions
 parseString :: String -> Ast.Ast

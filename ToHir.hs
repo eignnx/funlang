@@ -58,47 +58,6 @@ instance Compile Ast.Item where
            ++ body' -- Then run the body of the function.
            ++ epilogue -- Finally, run the epilogue.
 
-instance Compile Ast.Stmt where
-  compile Ast.Skip              = return []
-  compile (Ast.Let var expr) = do
-    expr' <- compile expr
-    return $ expr' ++ [Hir.Store var]
-  compile (Ast.Assign var expr) = do
-    expr' <- compile expr
-    return $ expr' ++ [Hir.Store var]
-  compile (Ast.If cond yes no) = do
-    cond'  <- compile cond
-    yes'   <- compile yes
-    noLbl  <- fresh
-    no'    <- compile no
-    endLbl <- fresh
-    return
-      $  cond'
-      ++ [Hir.JmpIfFalse noLbl]
-      ++ yes'
-      ++ [Hir.Jmp endLbl]
-      ++ [Hir.Label noLbl]
-      ++ no'
-      ++ [Hir.Label endLbl]
-  compile (Ast.While cond body) = do
-    cond' <- compile cond
-    top   <- fresh
-    body' <- compile body
-    end   <- fresh
-    return
-      $  [Hir.Label top]
-      ++ cond'
-      ++ [Hir.JmpIfFalse end]
-      ++ body'
-      ++ [Hir.Jmp top]
-      ++ [Hir.Label end]
-  compile (Ast.Expr expr) = do
-    e <- compile expr
-    return $ e ++ case expr of
-      Ast.Block _ -> [] -- Skip the pop if it's a block expression.
-      Ast.Call _ _ -> [] -- TODO: TEMPORARY! Skip the pop if it's a call expression.
-      _ -> [Hir.Pop] -- Gotta pop unused value off the TOS.
-
 instance Compile Ast.ArithOp where
   compile op = return $ case op of
     Ast.Add -> [Hir.Add]
@@ -140,6 +99,40 @@ instance Compile Ast.Expr where
     args' <- mapM compile args
     let intr = Intr.fromName name pos
     return $ join args' ++ [Hir.Intrinsic intr]
+
+  compile Ast.Nop            = return [Hir.Nop]
+  compile (Ast.Let var expr) = do
+    expr' <- compile expr
+    return $ expr' ++ [Hir.Store var]
+  compile (Ast.Assign var expr) = do
+    expr' <- compile expr
+    return $ expr' ++ [Hir.Store var]
+  compile (Ast.If cond yes no) = do
+    cond'  <- compile cond
+    yes'   <- compile yes
+    noLbl  <- fresh
+    no'    <- compile no
+    endLbl <- fresh
+    return
+      $  cond'
+      ++ [Hir.JmpIfFalse noLbl]
+      ++ yes'
+      ++ [Hir.Jmp endLbl]
+      ++ [Hir.Label noLbl]
+      ++ no'
+      ++ [Hir.Label endLbl]
+  compile (Ast.While cond body) = do
+    cond' <- compile cond
+    top   <- fresh
+    body' <- compile body
+    end   <- fresh
+    return
+      $  [Hir.Label top]
+      ++ cond'
+      ++ [Hir.JmpIfFalse end]
+      ++ body'
+      ++ [Hir.Jmp top]
+      ++ [Hir.Label end]
 
 instance Compile Ast.UnaryOp where
   compile Ast.Not = return [Hir.Not]
