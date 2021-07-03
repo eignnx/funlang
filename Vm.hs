@@ -232,8 +232,10 @@ runIntrinsic op = case op of
   Intr.Print -> do
     x <- pop
     lift $ Lir.displayValue x
+    push Lir.VVoid
   Intr.Here pos -> do
     lift $ putStrLn ("intr.here[] at " ++ show pos)
+    push Lir.VVoid
   Intr.Exit -> do
     modify $ \state -> state { running = False }
 

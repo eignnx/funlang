@@ -93,7 +93,9 @@ instance Compile Ast.Stmt where
       ++ [Hir.Label end]
   compile (Ast.Expr expr) = do
     e <- compile expr
-    return $ e ++ [Hir.Pop] -- Gotta pop unused value off the TOS.
+    return $ e ++ case expr of
+      Ast.Block _ -> [] -- Skip the pop if it's a block expression.
+      _ -> [Hir.Pop] -- Gotta pop unused value off the TOS.
 
 instance Compile Ast.ArithOp where
   compile op = return $ case op of
@@ -176,17 +178,20 @@ instance Compile Ast.RelOp where
     Ast.Eq  -> [Hir.Eq]
     Ast.Neq -> [Hir.Eq, Hir.Not]
 
-addEntryPointJump :: [Hir.Instr] -> [(String, Hir.Lbl)] -> [Hir.Instr]
-addEntryPointJump hir defs = globalDefs ++ entryPointJump ++ hir
-  where globalDefs = defs >>= (\(name, lbl) -> [Hir.Const (Hir.VLbl lbl), Hir.Store name])
-        entryPointJump = [Hir.Jmp mainLbl]
+trampoline :: [(String, Hir.Lbl)] -> [Hir.Instr]
+trampoline defs = globalDefs ++ entryPointJump ++ exit
+  where
+    exit = [Hir.Intrinsic Intr.Exit]
+    globalDefs = defs >>= (\(name, lbl) -> [Hir.Const (Hir.VLbl lbl), Hir.Store name])
+    entryPointJump = [Hir.Const (Hir.VLbl mainLbl), Hir.Call 0]
+      where
         Just mainLbl = lookup "main" defs
 
-initialCState = CState { lbl_ = Hir.Lbl 0, defs_ = [] }
-
 astToHir :: Compile a => a -> [Hir.Instr]
-astToHir ast = addEntryPointJump hir defs
+astToHir ast = trampoline defs ++ hir
   where (hir, CState { defs_ = defs }) = runCompilation ast
+
+initialCState = CState { lbl_ = Hir.Lbl 0, defs_ = [] }
 
 runCompilation :: Compile a => a -> ([Hir.Instr], CState)
 runCompilation ast = runState (compile ast) initialCState
