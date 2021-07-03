@@ -13,6 +13,7 @@ import qualified Vm
 import           System.Environment             ( getArgs )
 import           Data.List                      ( find, isPrefixOf, stripPrefix )
 import           Control.Monad                  ( when )
+import           Text.Printf                    ( printf )
 
 data Opts
   = Opts { filename         :: String
@@ -105,7 +106,10 @@ printHir :: [Hir.Instr] -> IO ()
 printHir hir = putStrLn $ unlines $ map show hir
 
 printLir :: [Lir.Instr] -> IO ()
-printLir lir = putStrLn $ unlines $ map show lir
+printLir lir = putStrLn $ unlines $ zipWith fmt [0..] lir
+  where
+    fmt :: Int -> Lir.Instr -> String
+    fmt i instr = printf "%3d: %s" i (show instr)
 
 compileAndRun :: Ast.Ast -> IO ()
 compileAndRun ast = do
