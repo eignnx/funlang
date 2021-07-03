@@ -1,40 +1,47 @@
-# Const (VInstrAddr (InstrAddr 25))
-# Store "main"
-# Const (VInstrAddr (InstrAddr 15))
-# Store "say2"
-# Const (VInstrAddr (InstrAddr 7))
-# Store "greet"
-# Jmp (InstrAddr 25)
-# Nop
-# Swap
-# Store "name"
-# Const (VString "Hello ")
-# Load "name"
-# Load "say2"
-# Call 2
-# Ret
-# Nop
-# Swap
-# Store "thing2"
-# Swap
-# Store "thing1"
-# Load "thing1"
-# Intrinsic Print
-# Load "thing2"
-# Intrinsic Print
-# Ret
-# Nop
-# Const (VString "Quincy")
-# Store "name"
-# Const (VString "Digger")
-# Load "greet"
-# Call 1
-# Const (VString "Pippen")
-# Load "greet"
-# Call 1
-# Load "name"
-# Intrinsic Print
-# Intrinsic Exit
+#   0: Const (VInstrAddr (InstrAddr 29))
+#   1: Store "main"
+#   2: Const (VInstrAddr (InstrAddr 18))
+#   3: Store "say2"
+#   4: Const (VInstrAddr (InstrAddr 9))
+#   5: Store "greet"
+#   6: Const (VInstrAddr (InstrAddr 29))
+#   7: Call 0
+#   8: Intrinsic Exit
+#   9: Nop
+#  10: Swap
+#  11: Store "name"
+#  12: Const (VString "Hello ")
+#  13: Load "name"
+#  14: Load "say2"
+#  15: Call 2
+#  16: Pop
+#  17: Ret
+#  18: Nop
+#  19: Swap
+#  20: Store "thing2"
+#  21: Swap
+#  22: Store "thing1"
+#  23: Load "thing2"
+#  24: Load "thing1"
+#  25: Concat
+#  26: Intrinsic Print
+#  27: Pop
+#  28: Ret
+#  29: Nop
+#  30: Const (VString "Quincy")
+#  31: Store "name"
+#  32: Const (VString "Digger")
+#  33: Load "greet"
+#  34: Call 1
+#  35: Pop
+#  36: Const (VString "Pippen")
+#  37: Load "greet"
+#  38: Call 1
+#  39: Pop
+#  40: Load "name"
+#  41: Intrinsic Print
+#  42: Pop
+#  43: Intrinsic Exit
 
 def greet[name] do
   say2["Hello ", name];
