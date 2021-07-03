@@ -73,7 +73,8 @@ data Expr
   deriving (Show)
 
 data Stmt
-  = Assign String Expr
+  = Let String Expr
+  | Assign String Expr
   | Ret Expr
   | If Expr Stmt Stmt
   | While Expr Stmt

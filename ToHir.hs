@@ -60,6 +60,9 @@ instance Compile Ast.Item where
 
 instance Compile Ast.Stmt where
   compile Ast.Skip              = return []
+  compile (Ast.Let var expr) = do
+    expr' <- compile expr
+    return $ expr' ++ [Hir.Store var]
   compile (Ast.Assign var expr) = do
     expr' <- compile expr
     return $ expr' ++ [Hir.Store var]
