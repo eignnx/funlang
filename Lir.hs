@@ -25,7 +25,6 @@ data Value
   | VBool Bool
   | VString String
   | VInstrAddr InstrAddr
-  | VVoid -- Represents the return value of a `void` fn.
   deriving Show
 
 displayValue :: Value -> IO ()

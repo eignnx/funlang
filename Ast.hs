@@ -9,6 +9,7 @@ module Ast
   , Lit(..)
   , UnaryOp(..)
   , Expr(..)
+  , IsVoid(..)
   )
 where
 
@@ -66,7 +67,7 @@ data Expr
   | Literal Lit
   | Unary UnaryOp Expr
   | Binary BinOp Expr Expr
-  | Block [Expr]
+  | Block IsVoid [Expr]
   | Call Expr [Expr]
   | Intrinsic Parsec.SourcePos String [Expr]
   | Let String Expr
@@ -75,4 +76,7 @@ data Expr
   | If Expr Expr Expr
   | While Expr Expr
   | Nop
+  deriving (Show)
+
+data IsVoid = IsVoid | NotVoid
   deriving (Show)
