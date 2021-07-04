@@ -227,10 +227,10 @@ blockExpr = do
   es <- many $ try terminatedExpr
   e <- optionMaybe expression
   reserved "end"
-  let exprs = case e of
-                Just expr -> es ++ [expr]
-                Nothing -> es
-  return $ Ast.Block exprs
+  let (isVoid, exprs) = case e of
+                Just expr -> (Ast.NotVoid, es ++ [expr])
+                Nothing -> (Ast.IsVoid, es)
+  return $ Ast.Block isVoid exprs
 
 -- REPL Helper Functions
 parseString :: String -> Ast.Ast

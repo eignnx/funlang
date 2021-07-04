@@ -48,8 +48,7 @@ instance Compile Ast.Item where
   compile (Ast.Def name params body) = do
     lbl <- fresh
     define name lbl
-    -- We gotta use Hir.Swap before store because the RETURN ADDRESS is on TOS!
-    let paramBindings = reverse params >>= \param -> [Hir.Swap, Hir.Store param]
+    let paramBindings = map Hir.Store $ reverse params
     let prologue = paramBindings -- First thing we do is store args (from stack) in memory.
     body' <- compile body
     let epilogue = [Hir.Ret] -- At the end of every function MUST be a return instr.
@@ -69,11 +68,11 @@ instance Compile Ast.OtherOp where
   compile Ast.Concat = return [Hir.Concat]
 
 instance Compile Ast.Expr where
-  compile (Ast.Block []            ) = return []
-  compile (Ast.Block (stmt : stmts)) = do
-    stmt'  <- compile stmt
-    stmts' <- compile (Ast.Block stmts)
-    return $ stmt' ++ stmts'
+  compile (Ast.Block _isVoid []            ) = return []
+  compile (Ast.Block isVoid (expr : exprs)) = do
+    expr'  <- compile expr
+    exprs' <- compile (Ast.Block isVoid exprs)
+    return $ expr' ++ exprs'
   compile (Ast.Var     name ) = return [Hir.Load name]
   compile (Ast.Literal lit  ) = return [Hir.Const (valueFromLit lit)]
   compile (Ast.Unary op expr) = do
@@ -86,6 +85,10 @@ instance Compile Ast.Expr where
     op' <- compile op
     -- NOTE: you gotta reverse these args below!
     return $ y' ++ x' ++ op'
+
+  compile (Ast.Ret expr) = do
+    expr' <- compile expr
+    return expr'
 
   compile (Ast.Call fn args) = do
     args' <- compile args -- Using `instance Compile a => Compile [a]`

@@ -22,11 +22,12 @@ type Stack = [Lir.Value]
 type Memory = [M.Map String Lir.Value]
 
 data VmState = VmState
-  { memory  :: Memory
-  , stack   :: Stack
-  , pc      :: Lir.InstrAddr
-  , instrs  :: [Lir.Instr]
-  , running :: Bool
+  { memory   :: Memory
+  , stack    :: Stack
+  , retAddrs :: [Lir.InstrAddr]
+  , pc       :: Lir.InstrAddr
+  , instrs   :: [Lir.Instr]
+  , running  :: Bool
   }
   deriving Show
 
@@ -98,6 +99,20 @@ incrPc :: VmProgram ()
 incrPc = do
   oldPc <- gets pc
   setPc (oldPc + 1)
+
+pushRetAddr :: Lir.InstrAddr -> VmProgram ()
+pushRetAddr retAddr = do
+  retAddrs_ <- gets retAddrs
+  modify $ \st -> st { retAddrs = (retAddr : retAddrs_) }
+
+popRetAddr :: VmProgram Lir.InstrAddr
+popRetAddr = do
+  retAddrs_ <- gets retAddrs
+  case retAddrs_ of
+    retAddr:retAddrs' -> do
+      modify $ \st -> st { retAddrs = retAddrs' }
+      return retAddr
+    [] -> error "Vm Return Stack Underflow!"
 
 pushNewFrame :: VmProgram ()
 pushNewFrame = do
@@ -212,17 +227,19 @@ stepVm instr = do
     --  | <arg 2>
     --  | <arg 1>
     Lir.Call argC -> do
-      fnAddr <- popInstrAddr
+      fnAddr <- popInstrAddr -- Get the function's entry address.
+
       -- Store the return address above all the args.
       pc_ <- gets pc
       let retAddr = pc_ + 1 -- Return to the NEXT instr.
-      push $ Lir.VInstrAddr retAddr
+      pushRetAddr retAddr
+
       -- Perform the jump.
       setPc (fnAddr - 1)
       pushNewFrame
       return ()
     Lir.Ret -> do
-      retAddr <- popInstrAddr
+      retAddr <- popRetAddr
       popMemFrame
       setPc (retAddr - 1)
       return ()
@@ -232,10 +249,8 @@ runIntrinsic op = case op of
   Intr.Print -> do
     x <- pop
     lift $ Lir.displayValue x
-    push Lir.VVoid
   Intr.Here pos -> do
     lift $ putStrLn ("intr.here[] at " ++ show pos)
-    push Lir.VVoid
   Intr.Exit -> do
     modify $ \state -> state { running = False }
 
@@ -247,14 +262,17 @@ nth (_ : xs) n  = nth xs (n - 1)
 
 debugStepProgram :: Lir.Instr -> VmProgram ()
 debugStepProgram instr = do
-  instrs_  <- gets instrs
-  pc_      <- gets pc
-  stack_   <- gets stack
-  memory_  <- gets memory
+  instrs_   <- gets instrs
+  pc_       <- gets pc
+  retAddrs_ <- gets retAddrs
+  stack_    <- gets stack
+  memory_   <- gets memory
   let Lir.InstrAddr pcNum = pc_
   lift $ putStrLn $ "\tInstr #" ++ show pcNum ++ ": " ++ show instr
   lift $ putStr "\tStack: "
   lift $ print stack_
+  lift $ putStr "\tReturn Addresses: "
+  lift $ print retAddrs_
   lift $ putStr "\tMemory: "
   lift $ print memory_
   stepVm instr
@@ -292,6 +310,7 @@ initState instrs =
   VmState { memory = [M.empty]
           , stack = []
           , pc = 0
+          , retAddrs = []
           , instrs = instrs
           , running = True
           }
