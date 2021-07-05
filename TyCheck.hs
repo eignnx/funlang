@@ -78,6 +78,8 @@ checkAllTypes exprs tys = go (Ok []) exprs tys
   where
     go :: CheckType a => Res [Ty] -> [a] -> [Ty] -> TyChecker (Res [Ty])
     go res [] [] = return res
+    go res _ [] = return $ Err $ RootCause "Too many arguments"
+    go res [] _ = return $ Err $ RootCause "Too few arguments"
     go res (e:es) (t:ts) = do
       eTy <- check e t
       case eTy of
@@ -236,7 +238,7 @@ instance CheckType Ast.Expr where
         Ok (FnTy argTys retTy) -> do
           res <- checkAllTypes args argTys
           return $ (res *> Ok retTy) `addError` msg
-            where msg = "The function `" ++ show fn ++ "` was expecting a `" ++ show argTys ++ "` but was given `" ++ show args ++ "`. This is a problem"
+            where msg = "The function `" ++ show fn ++ "` was expecting arguments `" ++ show argTys ++ "` but was given `" ++ show args ++ "`. This is a problem"
         Ok nonFnTy -> return $ Err $ RootCause $ msg
           where msg = "`" ++ show fn ++ "` is a `" ++ show nonFnTy ++ "`, not a function"
         err -> return err
@@ -300,6 +302,7 @@ instance CheckType Ast.Expr where
     return $ res `addError` msg
       where msg = "Expression `" ++ show expr ++ "` does not have type `" ++ show ty ++ "`"
 
+  -- Default case.
   infer expr = return $ Err $ RootCause $ msg
     where msg = "I don't have enough information to infer the type of `" ++ show expr ++ "`"
 
