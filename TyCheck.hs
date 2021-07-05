@@ -343,7 +343,9 @@ instance CheckType Ast.Expr where
   check (Ast.Assign name expr) ty = do
     ty <- varLookup name
     case ty of
-      Ok varTy -> check expr varTy
+      Ok varTy -> do
+        res <- check expr varTy
+        return $ res *> Ok unitTy
       err -> return $ err `addError` msg
         where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`"
 
