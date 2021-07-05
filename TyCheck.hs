@@ -221,18 +221,14 @@ instance CheckType Ast.Expr where
 
   infer (Ast.Block Ast.IsVoid exprs) = do
     case exprs of
-      [] -> return $ Ok unitTy
-      [e] -> do
-        res <- check e unitTy
-        return $ res `addError` msg
-          where msg = "I was expecting this block expression to be type `" ++ show unitTy ++ "`. This is a problem"
+      [] -> return $ Ok unitTy -- All `IsVoid` blocks return Unit.
       e:es -> infer e *> infer (Ast.Block Ast.IsVoid es)
   
   infer (Ast.Block Ast.NotVoid exprs) = do
     case exprs of
-      [] -> return $ Ok unitTy
-      [e] -> infer e
-      e:es -> infer e *> infer (Ast.Block Ast.IsVoid es)
+      [] -> return $ Ok unitTy -- An empty Block returns Unit.
+      [e] -> infer e -- The base case we care about: one expression left.
+      e:es -> infer e *> infer (Ast.Block Ast.NotVoid es)
 
   infer (Ast.Call fn args) = do
     inferred <- infer fn
