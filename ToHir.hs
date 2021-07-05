@@ -104,6 +104,7 @@ instance Compile Ast.Expr where
     return $ join args' ++ [Hir.Intrinsic intr]
 
   compile Ast.Nop            = return [Hir.Nop]
+  compile (Ast.Ann expr ty)  = compile expr
   compile (Ast.Let var expr) = do
     expr' <- compile expr
     return $ expr' ++ [Hir.Store var]

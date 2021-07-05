@@ -1,6 +1,7 @@
 module Ast
   ( Ast
   , Item(..)
+  , itemName
   , BinOp(..)
   , ArithOp(..)
   , BoolOp(..)
@@ -13,12 +14,16 @@ module Ast
   )
 where
 
+import qualified Ty
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
 
 type Ast = [Item]
 
-data Item = Def String [String] Expr
+data Item = Def String [(String, Ty.Ty)] (Expr, Maybe Ty.Ty)
   deriving (Show)
+
+itemName :: Item -> String
+itemName (Def name _ _) = name
 
 data BinOp
   = ArithOp ArithOp
@@ -55,6 +60,7 @@ data Lit
   = Bool Bool
   | Int Integer
   | String String
+  | Unit
   deriving (Show)
 
 data UnaryOp
@@ -76,6 +82,7 @@ data Expr
   | If Expr Expr Expr
   | While Expr Expr
   | Nop
+  | Ann Expr Ty.Ty
   deriving (Show)
 
 data IsVoid = IsVoid | NotVoid
