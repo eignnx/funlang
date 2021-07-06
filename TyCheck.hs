@@ -8,7 +8,7 @@ module TyCheck
 where
 
 import qualified Ast
-import           Ty            ( Ty(..), unitTy, boolTy, intTy, textTy, (<:) )
+import           Ty            ( Ty(..), (<:), neverTy, unitTy, boolTy, intTy, textTy )
 import qualified Data.Map      as M
 import           Control.Monad ( foldM )
 import           Data.Semigroup
@@ -244,7 +244,7 @@ instance CheckType Ast.Expr where
           where msg = "`" ++ show fn ++ "` is a `" ++ show nonFnTy ++ "`, not a function"
         err -> return err
 
-  infer (Ast.Intrinsic _loc name args) = return $ Ok NeverTy -- FIXME: Cop-out for now.
+  infer (Ast.Intrinsic _loc name args) = return $ Ok neverTy -- FIXME: Cop-out for now.
 
   infer (Ast.Let name expr) = do
     exprTy <- infer expr
@@ -268,7 +268,7 @@ instance CheckType Ast.Expr where
   infer (Ast.Ret expr) = do
     exprTy <- infer expr
     case exprTy of
-      Ok exprTy' -> return $ Ok NeverTy
+      Ok exprTy' -> return $ Ok neverTy
       err -> return err
 
   -- infer ctx (FnExpr (AnnParam param paramTy) body) =
