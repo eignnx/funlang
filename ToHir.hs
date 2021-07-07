@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+
 module ToHir
     ( initialCState
     , astToHir
@@ -45,7 +47,8 @@ instance Compile a => Compile [a] where
     return (x' ++ xs')
 
 instance Compile Ast.Item where
-  compile (Ast.Def name params body) = do
+  compile (Ast.Def name paramsAndTypes (body, retTy)) = do
+    let params = map fst paramsAndTypes
     lbl <- fresh
     define name lbl
     let paramBindings = map Hir.Store $ reverse params
