@@ -125,7 +125,7 @@ instance CheckType Ast.Ast where
   check items m = do
     itemsTy <- infer items
     case itemsTy of
-      Ok itemsTy' | ModTy itemsTy' <: ModTy m -> return $ Ok m
+      Ok itemsTy' | itemsTy' <: m -> return $ Ok m
       Ok notM -> return $ Err $ RootCause msg
         where msg = "Module has type `" ++ show notM ++ "`, not `" ++ show m
       _ -> error "Unexpected thing inside `check @Ast.Ast`!"
