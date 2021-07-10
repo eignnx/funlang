@@ -4,8 +4,8 @@
 {-# LANGUAGE InstanceSigs #-}
 
 module TyCheck
-  ( infer
-  , check
+  ( CheckType(..)
+  , initState
   )
 where
 
@@ -79,6 +79,9 @@ multiError rs = Err $ go rs
 data TyCheckerState = TyCheckerState { _ctx :: Ctx }
   deriving (Show)
 
+initState :: TyCheckerState
+initState = TyCheckerState { _ctx = M.empty }
+
 type TyChecker = State TyCheckerState
 
 define :: String -> Ty -> TyChecker Ty
@@ -113,6 +116,9 @@ instance CheckType Ast.Ast where
         let name = Ast.itemName item
         let m'   = M.insert name itemTy m
         return $ Ok ((item':ast') `HasTy` ModTy m')
+      (Err e1, Err e2) -> return $ multiError [Err e1, Err e2]
+      (_, Err e) -> return $ Err e
+      (Err e, _) -> return $ Err e
       _ -> error "Unexpected thing inside `infer @Ast.Ast`!"
 
   check [] (ModTy m) | m == M.empty = return $ Ok ([] `HasTy` ModTy m)
@@ -122,7 +128,7 @@ instance CheckType Ast.Ast where
       Ok (ast' `HasTy` astTy) | astTy <: m -> return $ Ok (ast' `HasTy` m)
       Ok (_ `HasTy` notM) -> return $ Err $ RootCause msg
         where msg = "Module has type `" ++ show notM ++ "`, not `" ++ show m
-      _ -> error "Unexpected thing inside `check @Ast.Ast`!"
+      err -> return err
 
 instance CheckType Ast.Item where
   type Checked Ast.Item = Ast.TypedItem
@@ -296,7 +302,7 @@ instance CheckType Ast.Expr where
     case argsRes of
       Ok args' -> do
         let intr = Ast.IntrinsicF loc name args'
-        let intrRetTy = neverTy -- FIXME: Cop-out for now.
+        let intrRetTy = unitTy -- FIXME: Cop-out for now.
         return $ Ok (intr `RecHasTy` intrRetTy)
       Err err -> return $ Err err
 
