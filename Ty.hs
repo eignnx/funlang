@@ -10,12 +10,18 @@ module Ty
 where
 
 import qualified Data.Map as M
+import           Data.List ( intercalate )
 
 data Ty
   = ValTy String
   | FnTy [Ty] Ty
   | ModTy (M.Map String Ty) -- The type of a module
-  deriving (Show, Eq)
+  deriving Eq
+
+instance Show Ty where
+  show (ValTy name) = name
+  show (FnTy params ret) = show params ++ " -> " ++ show ret
+  show (ModTy m) = "{ " ++ intercalate ", " ((\(name, ty) -> name ++ ": " ++ show ty) <$> M.toList m) ++ " }"
 
 (<:) :: Ty -> Ty -> Bool
 never <: t2 | never == neverTy = True

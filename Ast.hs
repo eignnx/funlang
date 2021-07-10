@@ -47,15 +47,21 @@ import qualified Text.ParserCombinators.Parsec.Pos as Parsec
 type Ast = [Item]
 type TypedAst = Typed [TypedItem]
 
+instance Show TypedAst where
+  show (items `HasTy` ty) = "Mod(" ++ show ty ++ "):\n" ++ (unlines $ map show items)
+
 data ItemG e = Def String [(String, Ty.Ty)] (e, Maybe Ty.Ty)
 type Item = ItemG Expr
 type TypedItem = Typed (ItemG TypedExpr)
 
 instance (Show e) => Show (ItemG e) where
   show (Def name paramsAndTys (body, Just retTy)) =
-    "def " ++ name ++ show paramsAndTys ++ " -> " ++ show retTy ++ show body
+    "def " ++ name ++ show paramsAndTys ++ " -> " ++ show retTy ++ " " ++ show body
   show (Def name paramsAndTys (body, Nothing)) =
     "def " ++ name ++ show paramsAndTys ++ " = " ++ show body
+
+instance Show TypedItem where
+  show (item `HasTy` ty) = "Item(" ++ show ty ++ "): " ++ show item
 
 itemName :: ItemG e -> String
 itemName (Def name _ _) = name
@@ -185,14 +191,14 @@ instance (Show (f ExprF)) => Show (ExprF (f ExprF)) where
     RelOp Eq       -> show x ++ " == " ++ show y
     RelOp Neq      -> show x ++ " != " ++ show y
     OtherOp Concat -> show x ++ " ++ " ++ show y
-  show (BlockF isVoid es) = "do\n" ++ unlines (map ((++";") . ("\t"++) . show) es) ++ "end"
+  show (BlockF isVoid es) = "do\n" ++ unlines (map ((++";") . ("\t"++) . show) es) ++ " end"
   show (CallF f args) = show f ++ show args
   show (IntrinsicF pos name args) = name ++ show args
   show (LetF name e) = "let " ++ name ++ " = " ++ show e
   show (AssignF name e) = name ++ " = " ++ show e
   show (RetF e) = "ret " ++ show e
-  show (IfF cond yes no) = "if " ++ show cond ++ " then " ++ show yes ++ " else " ++ show no ++ "end"
-  show (WhileF cond body) = "while " ++ show cond ++ show body
+  show (IfF cond yes no) = "if " ++ show cond ++ " then " ++ show yes ++ " else " ++ show no ++ " end"
+  show (WhileF cond body) = "while " ++ show cond ++ show body ++ " end"
   show NopF = "nop"
   show (AnnF e t) = show e ++ ": " ++ show t
 
