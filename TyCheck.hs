@@ -1,5 +1,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE InstanceSigs #-}
 
 module TyCheck
   ( infer
@@ -8,6 +10,7 @@ module TyCheck
 where
 
 import qualified Ast
+import           Ast           ( Typed(HasTy), RecTyped(RecHasTy) )
 import           Ty            ( Ty(..), (<:), neverTy, unitTy, boolTy, intTy, textTy )
 import qualified Data.Map      as M
 import           Control.Monad ( foldM )
@@ -73,19 +76,6 @@ multiError rs = Err $ go rs
     go ((Err e):es) = MultiError e (go es)
     go ((Ok _):es) = go es
 
-checkAllTypes :: CheckType a => [a] -> [Ty] -> TyChecker (Res [Ty])
-checkAllTypes exprs tys = go (Ok []) exprs tys
-  where
-    go :: CheckType a => Res [Ty] -> [a] -> [Ty] -> TyChecker (Res [Ty])
-    go res [] [] = return res
-    go res _ [] = return $ Err $ RootCause "Too many arguments"
-    go res [] _ = return $ Err $ RootCause "Too few arguments"
-    go res (e:es) (t:ts) = do
-      eTy <- check e t
-      case eTy of
-        Ok t' -> go (res <> Ok [t']) es ts
-        Err e -> go (res <> Err e) es ts
-
 data TyCheckerState = TyCheckerState { _ctx :: Ctx }
   deriving (Show)
 
@@ -106,65 +96,82 @@ varLookup name = do
   return res
 
 class CheckType a where
-  infer :: a -> TyChecker (Res Ty)
-  check :: a -> Ty -> TyChecker (Res Ty)
+  type Checked a :: *
+  infer :: a -> TyChecker (Res (Checked a))
+  check :: a -> Ty -> TyChecker (Res (Checked a))
 
 instance CheckType Ast.Ast where
+  type Checked Ast.Ast = Ast.TypedAst
 
-  infer [] = return $ Ok $ ModTy $ M.empty
-  infer (item:items) = do
-    itemTy <- infer item
-    itemsTy <- infer items
-    case (itemTy, itemsTy) of
-      (Ok ty, Ok (ModTy m)) -> return $ Ok $ ModTy m'
-        where m' = M.insert name ty m
-              name = Ast.itemName item
+  infer :: Ast.Ast -> TyChecker (Res Ast.TypedAst)
+  infer [] = return $ Ok $ ([] `HasTy` (ModTy M.empty))
+  infer (item:ast) = do
+    itemRes <- infer item
+    astRes  <- infer ast
+    case (itemRes, astRes) of
+      (Ok item'@(_ `HasTy` itemTy), Ok (ast' `HasTy` (ModTy m))) -> do
+        let name = Ast.itemName item
+        let m'   = M.insert name itemTy m
+        return $ Ok ((item':ast') `HasTy` ModTy m')
       _ -> error "Unexpected thing inside `infer @Ast.Ast`!"
 
-  check [] (ModTy m) | m == M.empty = return $ Ok $ ModTy m
-  check items m = do
-    itemsTy <- infer items
-    case itemsTy of
-      Ok itemsTy' | itemsTy' <: m -> return $ Ok m
-      Ok notM -> return $ Err $ RootCause msg
+  check [] (ModTy m) | m == M.empty = return $ Ok ([] `HasTy` ModTy m)
+  check ast m = do
+    astRes <- infer ast
+    case astRes of
+      Ok (ast' `HasTy` astTy) | astTy <: m -> return $ Ok (ast' `HasTy` m)
+      Ok (_ `HasTy` notM) -> return $ Err $ RootCause msg
         where msg = "Module has type `" ++ show notM ++ "`, not `" ++ show m
       _ -> error "Unexpected thing inside `check @Ast.Ast`!"
 
 instance CheckType Ast.Item where
+  type Checked Ast.Item = Ast.TypedItem
+
+  infer :: Ast.Item -> TyChecker (Res Ast.TypedItem)
 
   -- For when the return type IS specified.
   infer (Ast.Def name params (body, Just retTy)) = do
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
       define param paramTy
-    res <- check body retTy
+    bodyRes <- check body retTy
     put st -- Restore old ctx
-    return res
+    case bodyRes of
+      Ok typedBody@(_ `RecHasTy` bodyTy) -> do
+        let def = Ast.Def name params (typedBody, Just retTy)
+        return $ Ok (def `HasTy` (FnTy paramTys bodyTy))
+      Err err -> return $ Err err
 
   -- For when the return type is NOT specified.
   infer (Ast.Def name params (body, Nothing)) = do
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
       define param paramTy
-    bodyTy <- infer body
+    bodyRes <- infer body
     put st -- Restore old ctx
-    case bodyTy of
-      Ok bodyTy' -> return $ Ok $ FnTy paramTys bodyTy'
-      err -> return err
+    case bodyRes of
+      Ok typedBody@(_ `RecHasTy` bodyTy) -> do
+        let def = Ast.Def name params (typedBody, Just bodyTy)
+        return $ Ok (def `HasTy` (FnTy paramTys bodyTy))
+      Err err -> return $ Err err
+
+  check :: Ast.Item -> Ty -> TyChecker (Res Ast.TypedItem)
 
   -- For when the return type IS specified.
   check (Ast.Def name params (body, Just retTy)) expected@(FnTy expectedParamTys expectedRetTy) = do
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
       define param paramTy
-    bodyTy <- check body expectedRetTy
+    bodyRes <- check body expectedRetTy
     put st -- Restore old ctx
-    case (paramTys == expectedParamTys, bodyTy) of
-      (True, Ok bodyTy') | retTy == bodyTy' -> return $ Ok expected
-      (_, Ok bodyTy') | retTy /= bodyTy' -> return $ Err $ RootCause msg
+    case (paramTys == expectedParamTys, bodyRes) of
+      (True, Ok body'@(_ `RecHasTy` bodyTy)) | retTy == bodyTy -> do
+        let def = Ast.Def name params (body', Just retTy)
+        return $ Ok (def `HasTy` expected)
+      (_, Ok (_ `RecHasTy` bodyTy)) | retTy /= bodyTy -> return $ Err $ RootCause msg
         where msg = "The function `" ++ name ++ "` has type `" ++ show actualTy ++ "`, not `" ++ show expected ++ "`"
-              actualTy = FnTy paramTys bodyTy'
-      (_, err) -> return $ err `addError` msg
+              actualTy = FnTy paramTys bodyTy
+      (_, Err err) -> return $ (Err err) `addError` msg
         where msg = "The function `" ++ name ++ "` does not match expected type `" ++ show expected ++ "`"
 
   -- For when the return type is NOT specified.
@@ -172,190 +179,263 @@ instance CheckType Ast.Item where
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
       define param paramTy
-    bodyTy <- check body expectedRetTy
+    bodyRes <- check body expectedRetTy
     put st -- Restore old ctx
-    case (paramTys == expectedParamTys, bodyTy) of
-      (True, Ok _) -> return $ Ok expected
-      (False, Ok bodyTy') -> return $ Err $ RootCause msg
-        where msg = "The function `" ++ name ++ "` has type `" ++ show actualTy ++ "`, not `" ++ show expected ++ "`"
-              actualTy = FnTy paramTys bodyTy'
-      (_, err) -> return $ err `addError` msg
+    case (paramTys == expectedParamTys, bodyRes) of
+      (True, Ok body'@(_ `RecHasTy` bodyTy)) -> do
+        let def = Ast.Def name params (body', Nothing)
+        return $ Ok (def `HasTy` expected)
+      (_, Err err) -> return $ (Err err) `addError` msg
         where msg = "The function `" ++ name ++ "` does not match expected type `" ++ show expected ++ "`"
 
 -- Helper function for inferring+checking unary operators.
 -- Pass in the expected type of the arguments, the expected return type, and it will do
 -- the checking and inference for you.
-inferUnaryOp :: Ty -> Ty -> Ast.Expr -> TyChecker (Res Ty)
-inferUnaryOp argTy retTy expr = do
-  exprTy <- check expr argTy
-  case exprTy of
-    Ok _ -> return $ Ok retTy
-    err -> return err
+inferUnaryOp :: Ast.UnaryOp
+             -> Ty
+             -> Ty
+             -> Ast.Expr
+             -> TyChecker (Res Ast.TypedExpr)
+inferUnaryOp op argTy retTy expr = do
+  exprRes <- check expr argTy
+  case exprRes of
+    Ok expr' -> return $ Ok (Ast.UnaryF op expr' `RecHasTy` retTy)
+    Err err -> return $ Err err
 
 -- Helper function for inferring+checking binary operators.
 -- Pass in the expected type of the arguments, the expected return type, and it will do
 -- the checking and inference for you.
-inferBinOp :: Ty -> Ty -> Ast.Expr -> Ast.Expr -> TyChecker (Res Ty)
-inferBinOp argTy retTy e1 e2 = do
+inferBinOp :: Ast.BinOp
+           -> Ty
+           -> Ty
+           -> Ast.Expr
+           -> Ast.Expr
+           -> TyChecker (Res Ast.TypedExpr)
+inferBinOp op argTy retTy e1 e2 = do
     e1Ty <- check e1 argTy
     e2Ty <- check e2 argTy
     case (e1Ty, e2Ty) of
-      (Ok _, Ok _) -> return $ Ok retTy
+      (Ok e1', Ok e2') -> return $ Ok (Ast.BinaryF op e1' e2' `RecHasTy` retTy)
       (a, b) -> return (a *> b)
 
 instance CheckType Ast.Expr where
 
-  infer (Ast.Var name) = varLookup name
+  type Checked Ast.Expr = Ast.TypedExpr
 
-  infer (Ast.Literal x) =
+  infer (Ast.Var name) = do
+    tyRes <- varLookup name
+    case tyRes of
+      Ok ty -> do
+        let var = Ast.VarF name
+        return $ Ok (var `RecHasTy` ty)
+      Err err -> return $ Err err
+
+  infer (Ast.Literal x) = do
+    let lit = Ast.LiteralF x
     return $ case x of
-      Ast.Unit     -> Ok unitTy
-      Ast.Bool _   -> Ok boolTy 
-      Ast.Int _    -> Ok intTy
-      Ast.String _ -> Ok textTy
+      Ast.Unit     -> Ok (lit `RecHasTy` unitTy)
+      Ast.Bool _   -> Ok (lit `RecHasTy` boolTy)
+      Ast.Int _    -> Ok (lit `RecHasTy` intTy)
+      Ast.String _ -> Ok (lit `RecHasTy` textTy)
 
-  infer (Ast.Unary Ast.Not expr) = inferUnaryOp boolTy boolTy expr
-  infer (Ast.Unary Ast.Neg expr) = inferUnaryOp intTy intTy expr
+  infer (Ast.Unary op@Ast.Not expr) = inferUnaryOp op boolTy boolTy expr
+  infer (Ast.Unary op@Ast.Neg expr) = inferUnaryOp op intTy intTy expr
 
-  infer (Ast.Binary (Ast.ArithOp _) e1 e2)          = inferBinOp intTy intTy e1 e2
-  infer (Ast.Binary (Ast.BoolOp _) e1 e2)           = inferBinOp boolTy boolTy e1 e2
-  infer (Ast.Binary (Ast.RelOp _) e1 e2)            = inferBinOp intTy boolTy e1 e2
-  infer (Ast.Binary (Ast.OtherOp Ast.Concat) e1 e2) = inferBinOp textTy textTy e1 e2
+  infer (Ast.Binary op@(Ast.ArithOp _) e1 e2)          = inferBinOp op intTy intTy e1 e2
+  infer (Ast.Binary op@(Ast.BoolOp _) e1 e2)           = inferBinOp op boolTy boolTy e1 e2
+  infer (Ast.Binary op@(Ast.RelOp _) e1 e2)            = inferBinOp op intTy boolTy e1 e2
+  infer (Ast.Binary op@(Ast.OtherOp Ast.Concat) e1 e2) = inferBinOp op textTy textTy e1 e2
 
   infer (Ast.Block Ast.IsVoid exprs) = do
-    case exprs of
-      [] -> return $ Ok unitTy -- All `IsVoid` blocks return Unit.
-      e:es -> infer e *> infer (Ast.Block Ast.IsVoid es)
+    exprsRes <- sequenceA <$> mapM infer exprs
+    case exprsRes of
+      Ok exprs' -> do
+        let block = Ast.BlockF Ast.IsVoid exprs'
+        return $ Ok (block `RecHasTy` unitTy)
+      Err err -> return $ Err err
   
   infer (Ast.Block Ast.NotVoid exprs) = do
-    case exprs of
-      [] -> return $ Ok unitTy -- An empty Block returns Unit.
-      [e] -> infer e -- The base case we care about: one expression left.
-      e:es -> infer e *> infer (Ast.Block Ast.NotVoid es)
+    exprsRes <- sequenceA <$> mapM infer exprs
+    case exprsRes of
+      Ok [] -> do
+        let block = Ast.BlockF Ast.NotVoid []
+        return $ Ok (block `RecHasTy` unitTy) -- An empty block has unit type.
+      Ok exprs -> do
+        let block = Ast.BlockF Ast.NotVoid exprs
+        let _ `RecHasTy` finalTy = last exprs
+        return $ Ok (block `RecHasTy` finalTy)
+      Err err -> return $ Err err
 
   infer (Ast.Call fn args) = do
-    inferred <- infer fn
-    case inferred of
-        Ok (FnTy argTys retTy) -> do
-          res <- checkAllTypes args argTys
-          return $ (res *> Ok retTy) `addError` msg
-            where msg = "The function `" ++ show fn ++ "` was expecting arguments `" ++ show argTys ++ "` but was given `" ++ show args ++ "`. This is a problem"
-        Ok nonFnTy -> return $ Err $ RootCause $ msg
-          where msg = "`" ++ show fn ++ "` is a `" ++ show nonFnTy ++ "`, not a function"
-        err -> return err
+    fnRes <- infer fn
+    case fnRes of
+      Ok fn'@(_ `RecHasTy` FnTy argTys retTy) -> do
+        argsRes <- checkArgs fn args argTys
+        case argsRes of
+          Ok args' -> do
+            let call = Ast.CallF fn' args'
+            return $ Ok (call `RecHasTy` retTy)
+          Err err -> return $ Err err
+      Ok (_ `RecHasTy` nonFnTy) -> return $ Err $ RootCause $ msg
+        where msg = "`" ++ show fn ++ "` is a `" ++ show nonFnTy ++ "`, not a function"
+      err -> return err
+      where
+        checkArgs :: Ast.Expr -> [Ast.Expr] -> [Ty] -> TyChecker (Res [Ast.TypedExpr])
+        checkArgs fn args argTys | length args == length argTys = do
+          argsCheckRes <- sequenceA <$> zipWithM check args argTys -- Check that the args have right types.
+          return $ argsCheckRes
+        checkArgs fn args argTys = do -- Wrong number of args provided.
+          return $ Err $ RootCause msg
+            where msg = "Oops! You passed " ++ show received ++ " arguments to `"
+                      ++ show fn ++ "`, but it expects " ++ show expected
+                  expected = length argTys
+                  received = length args
 
-  infer (Ast.Intrinsic _loc name args) = return $ Ok neverTy -- FIXME: Cop-out for now.
+  infer (Ast.Intrinsic loc name args) = do
+    argsRes <- sequenceA <$> mapM infer args
+    case argsRes of
+      Ok args' -> do
+        let intr = Ast.IntrinsicF loc name args'
+        let intrRetTy = neverTy -- FIXME: Cop-out for now.
+        return $ Ok (intr `RecHasTy` intrRetTy)
+      Err err -> return $ Err err
 
   infer (Ast.Let name expr) = do
-    exprTy <- infer expr
-    case exprTy of
-      Ok exprTy' -> do
-        define name exprTy'
-        return $ Ok unitTy
+    exprRes <- infer expr
+    case exprRes of
+      Ok expr'@(_ `RecHasTy` exprTy) -> do
+        define name exprTy
+        let letExpr = Ast.LetF name expr'
+        return $ Ok (letExpr `RecHasTy` unitTy)
       err -> return $ err `addError` msg
         where msg = "The declaration of `" ++ name ++ "` needs a type annotation"
 
   infer (Ast.Assign name expr) = do
-    varTy <- varLookup name
-    case varTy of
-      Ok varTy' -> do
-        exprTy <- check expr varTy'
-        return $ exprTy `addError` msg *> Ok unitTy
-          where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`"
-      err -> return $ err `addError` msg
+    varRes <- varLookup name
+    case varRes of
+      Ok varTy -> do
+        exprRes <- check expr varTy
+        case exprRes of
+          Ok expr' -> do
+            let assign = Ast.AssignF name expr'
+            return $ Ok (assign `RecHasTy` unitTy)
+          err -> return $ err `addError` msg
+            where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`"
+      Err err -> return $ Err err `addError` msg
         where msg = "I can't assign to the undeclared variable `" ++ name ++ "`"
 
   infer (Ast.Ret expr) = do
-    exprTy <- infer expr
-    case exprTy of
-      Ok exprTy' -> return $ Ok neverTy
+    exprRes <- infer expr
+    case exprRes of
+      Ok expr' -> do
+        let ret = Ast.RetF expr'
+        return $ Ok (ret `RecHasTy` neverTy)
       err -> return err
 
-  -- infer ctx (FnExpr (AnnParam param paramTy) body) =
-  --   let ctx' = (param, paramTy) : ctx
-  --   in case infer ctx' body of
-  --     Ok bodyTy -> Ok $ FnTy paramTy bodyTy
-  --     err -> err
-  -- infer ctx fn@(FnExpr (Infer param) body) =
-  --   Err $ RootCause $ "I can't infer the type of the parameter `" ++ param ++ "` in the function `" ++ show fn ++ "`"
+--   -- infer ctx (FnExpr (AnnParam param paramTy) body) =
+--   --   let ctx' = (param, paramTy) : ctx
+--   --   in case infer ctx' body of
+--   --     Ok bodyTy -> Ok $ FnTy paramTy bodyTy
+--   --     err -> err
+--   -- infer ctx fn@(FnExpr (Infer param) body) =
+--   --   Err $ RootCause $ "I can't infer the type of the parameter `" ++ param ++ "` in the function `" ++ show fn ++ "`"
 
+  -- To INFER the type of an if expression:
+  --   1. INFER one of it's branches, then
+  --   2. CHECK that the whole if expr has that type.
+  -- NOTE #1: We only need to be able to INFER one (1) of the branches.
+  -- NOTE #2: The traslation to Ast.TypedExpr will be done by `check`.
   infer ifExpr@(Ast.If cond yes no) = do
-    yesCheck <- infer yes
-    noCheck <- infer no
-    case (yesCheck, noCheck) of
-        (Ok yesTy, _) -> check ifExpr yesTy -- Ensure yes-branch and entire expr have same type.
-        (_, Ok noTy) -> check ifExpr noTy -- Ensure no-branch and entire expr have same type.
-        (err1, err2) -> return $ multiError [err1, err2] `addError` msg
-          where msg = "I couldn't infer the type of the `if` expression"
+    yesRes <- infer yes
+    noRes <- infer no
+    case (yesRes, noRes) of
+        (Ok (_ `RecHasTy` yesTy), _) -> check ifExpr yesTy -- Ensure yes-branch and entire expr have same type.
+        (_, Ok (_ `RecHasTy` noTy)) -> check ifExpr noTy -- Ensure no-branch and entire expr have same type.
+        (e1, e2) -> return $ multiError [e1, e2] `addError` msg
+          where msg = "I couldn't infer the type of the `if` expression `" ++ show ifExpr ++ "`"
 
+  -- A while expression does NOT return the never type. This is because
+  -- usually, it does not infinitely loop. It usually loops until the
+  -- condition is no longer true, then ends, yielding unit (void).
   infer (Ast.While cond body) = do
-    condTy <- check cond boolTy
-    bodyTy <- infer body
-    case (condTy, bodyTy) of
-        (Ok _, Ok _) -> return $ Ok unitTy
+    condRes <- check cond boolTy
+    bodyRes <- infer body
+    case (condRes, bodyRes) of
+        (Ok cond', Ok body') -> do
+          let while = Ast.WhileF cond' body'
+          return $ Ok (while `RecHasTy` unitTy)
         (res1, res2) -> return $ multiError [res1, res2] `addError` msg
           where msg = "I couldn't infer the type of the `while` expression"
 
-  infer Ast.Nop = return $ Ok unitTy
+  infer Ast.Nop = return $ Ok (Ast.NopF `RecHasTy` unitTy)
 
   infer (Ast.Ann expr ty) = do
     res <- check expr ty
-    return $ res `addError` msg
+    let rebuild expr' = (Ast.AnnF expr' ty `RecHasTy` ty)
+    return $ (rebuild <$> res) `addError` msg
       where msg = "Expression `" ++ show expr ++ "` does not have type `" ++ show ty ++ "`"
 
   -- Default case.
   infer expr = return $ Err $ RootCause $ msg
     where msg = "I don't have enough information to infer the type of `" ++ show expr ++ "`"
 
+  check :: Ast.Expr -> Ty -> TyChecker (Res Ast.TypedExpr)
 
   check (Ast.If cond yes no) ty = do
-    boolCheck <- check cond boolTy
-    yesCheck <- check yes ty
-    noCheck <- check no ty
-    case (boolCheck, yesCheck, noCheck) of
-      (Ok _, Ok _, Ok _) -> return $ Ok ty
+    condRes <- check cond boolTy
+    yesRes <- check yes ty
+    noRes <- check no ty
+    case (condRes, yesRes, noRes) of
+      (Ok cond', Ok yes', Ok no') -> do
+        let ifExpr = Ast.IfF cond' yes' no'
+        return $ Ok (ifExpr `RecHasTy` ty)
       (condErr@(Err _), yesRes, noRes) ->
         return $ multiError [condErr', yesRes, noRes]
           where condErr' = condErr `addError` msg
                 msg = "The condition of an `if` must have type `" ++ show boolTy ++ "`, but this one doesn't"
       (_, yesRes, noRes) -> return $ multiError [yesRes, noRes]
 
-  -- check ctx fn@(FnExpr param body) (FnTy paramTy retTy) =
-  --   let pName = paramName param
-  --   in case check ((pName, paramTy) : ctx) body retTy of
-  --        Ok _ -> Ok (FnTy paramTy retTy)
-  --        err -> err `addError` ("Body of function `" ++ show fn ++ "` does not match expected type `" ++ show retTy ++ "`")
+--   -- check ctx fn@(FnExpr param body) (FnTy paramTy retTy) =
+--   --   let pName = paramName param
+--   --   in case check ((pName, paramTy) : ctx) body retTy of
+--   --        Ok _ -> Ok (FnTy paramTy retTy)
+--   --        err -> err `addError` ("Body of function `" ++ show fn ++ "` does not match expected type `" ++ show retTy ++ "`")
 
-  -- check ctx (Asg.Let (AnnParam var varTy) binding body) ty =
-  --   case check ctx binding varTy of
-  --        Ok _ -> check ((var, varTy):ctx) body ty
-  --        err -> err `addError` ("The variable `" ++ var ++ "` is declared as a `" ++ show varTy ++ "`, but is bound to `" ++ show binding ++ "`. This is a problem")
-  --   -- check ctx (App (FnExpr var body) binding) ty
+--   -- check ctx (Asg.Let (AnnParam var varTy) binding body) ty =
+--   --   case check ctx binding varTy of
+--   --        Ok _ -> check ((var, varTy):ctx) body ty
+--   --        err -> err `addError` ("The variable `" ++ var ++ "` is declared as a `" ++ show varTy ++ "`, but is bound to `" ++ show binding ++ "`. This is a problem")
+--   --   -- check ctx (App (FnExpr var body) binding) ty
 
-  check (Ast.Let name expr) ty = do
-    ty <- infer expr
-    case ty of
-      Ok varTy -> do
-        define name varTy
-        return $ Ok unitTy
-      err -> return $ err `addError` msg
-        where msg = "The declaration of `" ++ name ++ "` needs a type annotation"
+  check (Ast.Let name expr) ty =
+    if ty == unitTy then do
+      res <- infer expr
+      case res of
+        Ok expr'@(_ `RecHasTy` exprTy) -> do
+          define name exprTy
+          let letExpr = Ast.LetF name expr'
+          return $ Ok (letExpr `RecHasTy` unitTy)
+        err -> return $ err `addError` msg
+          where msg = "The declaration of `" ++ name ++ "` needs a type annotation"
+    else
+      return $ Err $ RootCause ("A let declaration has type `" ++ show unitTy ++ "`")
 
   check (Ast.Assign name expr) ty = do
-    ty <- varLookup name
-    case ty of
+    nameRes <- varLookup name
+    case nameRes of
       Ok varTy -> do
         res <- check expr varTy
-        return $ res *> Ok unitTy
-      err -> return $ err `addError` msg
+        let rebuild expr' = Ast.AssignF name expr' `RecHasTy` unitTy
+        return $ rebuild <$> res
+      Err err -> return (Err err `addError` msg)
         where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`"
 
   -- Default case.
   check expr ty = do
-    exprTy <- infer expr
-    return $ case exprTy of
-      Ok ty' | ty' <: ty -> Ok ty'
-      Ok ty' -> Err $ RootCause msg
-        where msg = "Expression `" ++ show expr ++ "` has type `" ++ show ty' ++ "`, not `" ++ show ty ++ "`"
+    exprRes <- infer expr
+    return $ case exprRes of
+      Ok expr'@(_ `RecHasTy` exprTy) | exprTy <: ty -> Ok expr'
+      Ok (_ `RecHasTy` exprTy) -> Err $ RootCause msg
+        where msg = "Expression `" ++ show expr ++ "` has type `" ++ show exprTy ++ "`, not `" ++ show ty ++ "`"
       err -> err `addError` msg
         where msg = "The expression `" ++ show expr ++ "` doesn't typecheck"

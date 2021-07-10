@@ -1,9 +1,14 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Ast
   ( Ast
+  , TypedAst(..)
+  , ItemG(..)
   , Item(..)
+  , TypedItem(..)
   , itemName
   , BinOp(..)
   , ArithOp(..)
@@ -14,6 +19,7 @@ module Ast
   , UnaryOp(..)
   , ExprF(..)
   , IsVoid(..)
+  , Fix(..)
   , Expr
   , pattern Var
   , pattern Literal
@@ -29,6 +35,9 @@ module Ast
   , pattern While
   , pattern Nop
   , pattern Ann
+  , Typed(..)
+  , RecTyped(..)
+  , TypedExpr
   )
 where
 
@@ -36,11 +45,19 @@ import qualified Ty
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
 
 type Ast = [Item]
+type TypedAst = Typed [TypedItem]
 
-data Item = Def String [(String, Ty.Ty)] (Expr, Maybe Ty.Ty)
-  deriving (Show)
+data ItemG e = Def String [(String, Ty.Ty)] (e, Maybe Ty.Ty)
+type Item = ItemG Expr
+type TypedItem = Typed (ItemG TypedExpr)
 
-itemName :: Item -> String
+instance (Show e) => Show (ItemG e) where
+  show (Def name paramsAndTys (body, Just retTy)) =
+    "def " ++ name ++ show paramsAndTys ++ " -> " ++ show retTy ++ show body
+  show (Def name paramsAndTys (body, Nothing)) =
+    "def " ++ name ++ show paramsAndTys ++ " = " ++ show body
+
+itemName :: ItemG e -> String
 itemName (Def name _ _) = name
 
 data BinOp
@@ -143,14 +160,19 @@ pattern Nop = Fix NopF
 pattern Ann :: Expr -> Ty.Ty -> Expr
 pattern Ann expr ty = Fix (AnnF expr ty)
 
-instance Show Expr where
-  show (Var name) = name
-  show (Literal (Int x)) = show x
-  show (Literal (Bool x)) = if x then "true" else "false"
-  show (Literal (String x)) = show x
-  show (Unary Not x) = "not " ++ show x
-  show (Unary Neg x) = "-(" ++ show x ++ ")"
-  show (Binary op x y) = case op of
+data Typed a = a `HasTy` Ty.Ty
+data RecTyped f =  (f (RecTyped f)) `RecHasTy` Ty.Ty
+
+type TypedExpr = RecTyped ExprF
+
+instance (Show (f ExprF)) => Show (ExprF (f ExprF)) where
+  show (VarF name) = name
+  show (LiteralF (Int x)) = show x
+  show (LiteralF (Bool x)) = if x then "true" else "false"
+  show (LiteralF (String x)) = show x
+  show (UnaryF Not x) = "not " ++ show x
+  show (UnaryF Neg x) = "-(" ++ show x ++ ")"
+  show (BinaryF op x y) = case op of
     ArithOp Add    -> show x ++ " + " ++ show y
     ArithOp Sub    -> show x ++ " - " ++ show y
     ArithOp Mul    -> show x ++ " * " ++ show y
@@ -163,16 +185,19 @@ instance Show Expr where
     RelOp Eq       -> show x ++ " == " ++ show y
     RelOp Neq      -> show x ++ " != " ++ show y
     OtherOp Concat -> show x ++ " ++ " ++ show y
-  show (Block isVoid es) = "do\n" ++ unlines (map ((++";") . ("\t"++) . show) es) ++ "end"
-  show (Call f args) = show f ++ show args
-  show (Intrinsic pos name args) = name ++ show args
-  show (Let name e) = "let " ++ name ++ " = " ++ show e
-  show (Assign name e) = name ++ " = " ++ show e
-  show (Ret e) = "ret " ++ show e
-  show (If cond yes no) = "if " ++ show cond ++ " then " ++ show yes ++ " else " ++ show no ++ "end"
-  show (While cond body) = "while " ++ show cond ++ show body
-  show Nop = "nop"
-  show (Ann e t) = show e ++ ": " ++ show t
+  show (BlockF isVoid es) = "do\n" ++ unlines (map ((++";") . ("\t"++) . show) es) ++ "end"
+  show (CallF f args) = show f ++ show args
+  show (IntrinsicF pos name args) = name ++ show args
+  show (LetF name e) = "let " ++ name ++ " = " ++ show e
+  show (AssignF name e) = name ++ " = " ++ show e
+  show (RetF e) = "ret " ++ show e
+  show (IfF cond yes no) = "if " ++ show cond ++ " then " ++ show yes ++ " else " ++ show no ++ "end"
+  show (WhileF cond body) = "while " ++ show cond ++ show body
+  show NopF = "nop"
+  show (AnnF e t) = show e ++ ": " ++ show t
 
-data Annotated f a = (f (Annotated f a)) `Is` a
-type TypedExpr = Annotated ExprF Ty.Ty
+instance Show TypedExpr where
+  show (e `RecHasTy` t) = "(" ++ show e ++ ") : " ++ show t
+
+instance Show Expr where
+  show (Fix e) = show e
