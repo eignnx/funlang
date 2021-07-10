@@ -57,7 +57,7 @@ data Error
 instance Show Error where
   show (RootCause explanation) = explanation ++ "."
   show (ResultingError extraInfo e) = extraInfo ++ " because...\n   " ++ show e
-  show (MultiError e1 e2) = show e1 ++ "\nAlso...\n   " ++ show e2
+  show (MultiError e1 e2) = show e1 ++ "\n\nAlso...\n   " ++ show e2
 
 instance Semigroup Error where
   e1 <> e2 = MultiError e1 e2
@@ -96,7 +96,7 @@ define name ty = do
 varLookup :: String -> TyChecker (Res Ty)
 varLookup name = do
   ctx <- gets _ctx
-  let reason = RootCause ("The variable `" ++ name ++ "` is not declared anywhere. Hint: maybe you meant `let " ++ name ++ " = ...`")
+  let reason = RootCause ("The variable `" ++ name ++ "` is not declared anywhere.")
   let res = toRes (M.lookup name ctx) reason
   return res
 
@@ -319,6 +319,7 @@ instance CheckType Ast.Expr where
         where msg = "The declaration of `" ++ name ++ "` needs a type annotation"
 
   infer (Ast.Assign name expr) = do
+    -- "\n   Hint: maybe you meant `let " ++ name ++ " = ...`"
     varRes <- varLookup name
     case varRes of
       Ok varTy -> do
@@ -328,7 +329,7 @@ instance CheckType Ast.Expr where
             let assign = Ast.AssignF name expr'
             return $ Ok (assign `RecHasTy` unitTy)
           err -> return $ err `addError` msg
-            where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`"
+            where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`\n   Hint: maybe you meant `let " ++ name ++ " = ...`"
       Err err -> return $ Err err `addError` msg
         where msg = "I can't assign to the undeclared variable `" ++ name ++ "`"
 
