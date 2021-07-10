@@ -1,6 +1,7 @@
 module Ty
   ( Ty(..)
   , (<:)
+  , neverTy
   , unitTy
   , boolTy
   , intTy
@@ -19,7 +20,7 @@ data Ty
 (<:) :: Ty -> Ty -> Bool
 never <: t2 | never == neverTy = True
 t1 <: t2 | t1 == t2 = True
--- FnTy x1 y1 <: FnTy x2 y2 = x2 <: x1 && y1 <: y2
+FnTy x1 y1 <: FnTy x2 y2 = all (\(x1', x2') -> x2' <: x1') (zip x1 x2) && y1 <: y2
 ModTy m1 <: ModTy m2 = m2 `M.isSubmapOf` m1
 _ <: _ = False
 
