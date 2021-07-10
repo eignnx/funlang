@@ -4,8 +4,10 @@
 {-# LANGUAGE InstanceSigs #-}
 
 module TyCheck
-  ( CheckType(..)
+  ( Res(..)
+  , CheckType(..)
   , initState
+  , astToTypedAst
   )
 where
 
@@ -445,3 +447,6 @@ instance CheckType Ast.Expr where
         where msg = "Expression `" ++ show expr ++ "` has type `" ++ show exprTy ++ "`, not `" ++ show ty ++ "`"
       err -> err `addError` msg
         where msg = "The expression `" ++ show expr ++ "` doesn't typecheck"
+
+astToTypedAst :: Ast.Ast -> Res Ast.TypedAst
+astToTypedAst ast = evalState (infer ast) initState
