@@ -5,11 +5,13 @@ module Main where
 import qualified Ast
 import qualified Parser
 import qualified Hir
-import qualified ToHir
+import qualified TyCheck
+import qualified TypedAstToHir
 import qualified Lir
 import qualified ToLir
 import qualified Vm
 
+import           System.Exit                    ( exitWith, ExitCode(..) )
 import           System.Environment             ( getArgs )
 import           Data.List                      ( find, isPrefixOf, stripPrefix )
 import           Control.Monad                  ( when )
@@ -52,7 +54,8 @@ main = do
   opts <- getOpts
   src  <- readFile (filename opts)
   ast  <- parseSrc opts src
-  hir  <- astToHir opts ast
+  tast <- astToTypedAst opts ast
+  hir  <- tastToHir opts tast
   lir  <- hirToLir opts hir
   execVmProgram opts lir
 
@@ -60,15 +63,28 @@ parseSrc :: Opts -> String -> IO Ast.Ast
 parseSrc opts src = do
   let ast = Parser.parseSrc (filename opts) src
   when (traceCompilation opts) $ do
-    putStrLn "===AST==="
+    putStrLn "\n===AST==="
     printAst ast
   return ast
 
-astToHir :: Opts -> Ast.Ast -> IO [Hir.Instr]
-astToHir opts ast = do
-  let hir = ToHir.astToHir ast
+astToTypedAst :: Opts -> Ast.Ast -> IO Ast.TypedAst
+astToTypedAst opts ast = do
+  case TyCheck.astToTypedAst ast of
+    TyCheck.Ok tast -> do
+      when (traceCompilation opts) $ do
+        putStrLn "\n===TAST==="
+        printTypedAst tast
+      return tast
+    TyCheck.Err err -> do
+      putStrLn $ "\n===COMPILATION ERROR===\n" ++ show err ++ "\n======================="
+      exitWith (ExitFailure 1)
+
+
+tastToHir :: Opts -> Ast.TypedAst -> IO [Hir.Instr]
+tastToHir opts ast = do
+  let hir = TypedAstToHir.astToHir ast
   when (traceCompilation opts) $ do
-    putStrLn "===HIR==="
+    putStrLn "\n===HIR==="
     printHir hir
   return hir
 
@@ -76,7 +92,7 @@ hirToLir :: Opts -> [Hir.Instr] -> IO [Lir.Instr]
 hirToLir opts hir = do
   let lir = ToLir.hirToLir hir
   when (traceCompilation opts) $ do
-    putStrLn "===LIR==="
+    putStrLn "\n===LIR==="
     printLir lir
   return lir
 
@@ -93,7 +109,10 @@ showAssoc assoc = unlines $ ["{"] ++ pairs ++ ["}"]
     formatter (key, val) = "\t" ++ show key ++ " = " ++ show val
 
 printAst :: Ast.Ast -> IO ()
-printAst ast = putStrLn $ showAssoc (ToHir.getDefs ast) ++ show ast
+printAst ast = print ast
+
+printTypedAst :: Ast.TypedAst -> IO ()
+printTypedAst tast = print tast
 
 printHir :: [Hir.Instr] -> IO ()
 printHir hir = putStrLn $ unlines $ map show hir
@@ -106,7 +125,10 @@ printLir lir = putStrLn $ unlines $ zipWith fmt [0..] lir
 
 compileAndRun :: Ast.Ast -> IO ()
 compileAndRun ast = do
-  let hirInstrs = ToHir.astToHir ast
+  let tast      = case TyCheck.astToTypedAst ast of
+                       TyCheck.Ok tast -> tast
+                       TyCheck.Err err -> error $ show err
+  let hirInstrs = TypedAstToHir.astToHir tast
   let lirInstrs = ToLir.hirToLir hirInstrs
   Vm.execVmProgram lirInstrs
   return ()

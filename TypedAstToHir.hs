@@ -1,4 +1,6 @@
-module ToHir
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+
+module TypedAstToHir
     ( initialCState
     , astToHir
     , runCompilation
@@ -7,6 +9,7 @@ module ToHir
 where
 
 import qualified Ast
+import           Ast                          ( Typed(..), RecTyped(..) )
 import qualified Hir
 import qualified Intr
 
@@ -43,9 +46,13 @@ instance Compile a => Compile [a] where
     x'  <- compile x
     xs' <- compile xs
     return (x' ++ xs')
+  
+instance Compile Ast.TypedAst where
+  compile (items `HasTy` ty) = compile items
 
-instance Compile Ast.Item where
-  compile (Ast.Def name params body) = do
+instance Compile Ast.TypedItem where
+  compile ((Ast.Def name paramsAndTypes (body, retTy)) `HasTy` ty) = do
+    let params = map fst paramsAndTypes
     lbl <- fresh
     define name lbl
     let paramBindings = map Hir.Store $ reverse params
@@ -67,30 +74,30 @@ instance Compile Ast.ArithOp where
 instance Compile Ast.OtherOp where
   compile Ast.Concat = return [Hir.Concat]
 
-instance Compile Ast.Expr where
-  compile (Ast.Block _isVoid []            ) = return []
-  compile (Ast.Block isVoid (expr : exprs)) = do
+instance Compile Ast.TypedExpr where
+  compile ((Ast.BlockF _isVoid []            ) `RecHasTy` ty) = return []
+  compile ((Ast.BlockF isVoid (expr : exprs)) `RecHasTy` ty) = do
     expr'  <- compile expr
-    exprs' <- compile (Ast.Block isVoid exprs)
+    exprs' <- compile ((Ast.BlockF isVoid exprs) `RecHasTy` ty)
     return $ expr' ++ exprs'
-  compile (Ast.Var     name ) = return [Hir.Load name]
-  compile (Ast.Literal lit  ) = return [Hir.Const (valueFromLit lit)]
-  compile (Ast.Unary op expr) = do
+  compile ((Ast.VarF     name ) `RecHasTy` ty) = return [Hir.Load name]
+  compile ((Ast.LiteralF lit  ) `RecHasTy` ty) = return [Hir.Const (valueFromLit lit)]
+  compile ((Ast.UnaryF op expr) `RecHasTy` ty) = do
     expr' <- compile expr
     op'   <- compile op
     return $ expr' ++ op'
-  compile (Ast.Binary op x y) = do
+  compile ((Ast.BinaryF op x y) `RecHasTy` ty) = do
     y'  <- compile y
     x'  <- compile x
     op' <- compile op
     -- NOTE: you gotta reverse these args below!
     return $ y' ++ x' ++ op'
 
-  compile (Ast.Ret expr) = do
+  compile ((Ast.RetF expr) `RecHasTy` ty) = do
     expr' <- compile expr
     return expr'
 
-  compile (Ast.Call fn args) = do
+  compile ((Ast.CallF fn args) `RecHasTy` ty) = do
     args' <- compile args -- Using `instance Compile a => Compile [a]`
     fn' <- compile fn
     let argC = length args
@@ -98,19 +105,20 @@ instance Compile Ast.Expr where
            ++ fn' -- Code to load the function pointer
            ++ [Hir.Call argC]
 
-  compile (Ast.Intrinsic pos name args) = do
+  compile ((Ast.IntrinsicF pos name args) `RecHasTy` ty) = do
     args' <- mapM compile args
     let intr = Intr.fromName name pos
     return $ join args' ++ [Hir.Intrinsic intr]
 
-  compile Ast.Nop            = return [Hir.Nop]
-  compile (Ast.Let var expr) = do
+  compile (Ast.NopF `RecHasTy` ty)            = return [Hir.Nop]
+  compile ((Ast.AnnF expr _) `RecHasTy` ty)  = compile expr
+  compile ((Ast.LetF var expr) `RecHasTy` ty) = do
     expr' <- compile expr
     return $ expr' ++ [Hir.Store var]
-  compile (Ast.Assign var expr) = do
+  compile ((Ast.AssignF var expr) `RecHasTy` ty) = do
     expr' <- compile expr
     return $ expr' ++ [Hir.Store var]
-  compile (Ast.If cond yes no) = do
+  compile ((Ast.IfF cond yes no) `RecHasTy` ty) = do
     cond'  <- compile cond
     yes'   <- compile yes
     noLbl  <- fresh
@@ -124,7 +132,7 @@ instance Compile Ast.Expr where
       ++ [Hir.Label noLbl]
       ++ no'
       ++ [Hir.Label endLbl]
-  compile (Ast.While cond body) = do
+  compile ((Ast.WhileF cond body) `RecHasTy` ty) = do
     cond' <- compile cond
     top   <- fresh
     body' <- compile body

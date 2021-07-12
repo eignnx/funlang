@@ -1,3 +1,5 @@
+{-# LANGUAGE BlockArguments #-}
+
 module Parser
   ( parseString
   , parseSrc
@@ -6,6 +8,7 @@ module Parser
 where
 
 import qualified Ast                  as Ast
+import qualified Ty                   as Ty
 import           Control.Monad
 import           System.IO
 import           Text.Parsec
@@ -52,6 +55,7 @@ languageDef = emptyDef
                             , "=="
                             , "!="
                             , "++"
+                            , "->"
                             ]
   }
 
@@ -72,6 +76,7 @@ whiteSpace = Token.whiteSpace lexer
 dot = Token.dot lexer
 semi = Token.semi lexer
 comma = Token.comma lexer
+colon = Token.colon lexer
 
 -- Statements
 -- The main statement parser
@@ -89,16 +94,23 @@ item = def
 -- OR
 -- ```
 -- def my-fn[arg1, arg2, ...] = ...expr...
+-- ```
 def :: Parser Ast.Item
 def = do
   reserved "def"
-  name   <- identifier
-  params <- brackets $ sepEndBy identifier (symbol ",")
-  body   <- exprBody <|> blockBody
-  return $ Ast.Def name params body
-    where
-      blockBody = blockExpr
-      exprBody = reservedOp "=" *> expression
+  name       <- identifier
+  let param  =  (,) <$> identifier <*> (colon *> ty)
+  params     <- brackets $ sepEndBy param (symbol ",")
+  let exprTail = (do reservedOp "="
+                     body <- expression
+                     return $ Ast.Def name params (body, Nothing))
+  let blockTail = (do retTy <- option Ty.voidTy (reservedOp "->" *> ty) -- Without a ret ty, def defaults to returning Unit.
+                      body  <- blockExpr
+                      return $ Ast.Def name params (body, Just retTy))
+  exprTail <|> blockTail
+
+ty :: Parser Ty.Ty
+ty = Ty.ValTy <$> identifier
 
 ifExpr :: Parser Ast.Expr
 ifExpr = do
@@ -157,6 +169,7 @@ operators =
 -- and `term`.
 term :: Parser Ast.Expr
 term =  try nestedCalls
+    <|> try nestedAnn
     <|> termFirst
 
 -- my-func[x, y][1, 2][a, b, c]
@@ -165,6 +178,13 @@ nestedCalls = do
   head <- termFirst
   allArgs <- many1 arguments
   return $ foldl Ast.Call head allArgs -- Build up all the calls
+
+-- 1 : Never : Nat : Int
+nestedAnn :: Parser Ast.Expr
+nestedAnn = do
+  head <- termFirst
+  allTys <- many1 (colon *> ty)
+  return $ foldl Ast.Ann head allTys -- Build up all the calls
 
 varExpr :: Parser Ast.Expr
 varExpr = Ast.Var <$> identifier
@@ -227,10 +247,14 @@ blockExpr = do
   es <- many $ try terminatedExpr
   e <- optionMaybe expression
   reserved "end"
-  let (isVoid, exprs) = case e of
-                Just expr -> (Ast.NotVoid, es ++ [expr])
-                Nothing -> (Ast.IsVoid, es)
-  return $ Ast.Block isVoid exprs
+  return case e of
+    Just expr -> Ast.Block Ast.NotVoid (es ++ [expr])
+    Nothing | endsInEndTerminatedExpr es -> Ast.Block Ast.NotVoid es
+    _ -> Ast.Block Ast.IsVoid es
+  where
+    endsInEndTerminatedExpr [] = False
+    endsInEndTerminatedExpr (e:[]) = Ast.isEndTerminatedExpr e
+    endsInEndTerminatedExpr (_:es) = endsInEndTerminatedExpr es
 
 -- REPL Helper Functions
 parseString :: String -> Ast.Ast
