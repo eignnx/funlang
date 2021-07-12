@@ -144,6 +144,13 @@ instance Compile Ast.TypedExpr where
       ++ body'
       ++ [Hir.Jmp top]
       ++ [Hir.Label end]
+  compile ((Ast.LoopF body) `RecHasTy` ty) = do
+    top   <- fresh
+    body' <- compile body
+    return
+      $  [Hir.Label top]
+      ++ body'
+      ++ [Hir.Jmp top]
 
 instance Compile Ast.UnaryOp where
   compile Ast.Not = return [Hir.Not]

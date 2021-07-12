@@ -377,6 +377,15 @@ instance CheckType Ast.Expr where
         (res1, res2) -> return $ (res1 *> res2) `addError` msg
           where msg = "I couldn't infer the type of the `while` expression"
 
+  infer (Ast.Loop body) = do
+    bodyRes <- infer body
+    case bodyRes of
+        Ok body' -> do
+          let loop = Ast.LoopF body'
+          return $ Ok (loop `RecHasTy` neverTy)
+        err -> return $ err `addError` msg
+          where msg = "I couldn't infer the type of the `loop` expression"
+
   infer Ast.Nop = return $ Ok (Ast.NopF `RecHasTy` voidTy)
 
   infer (Ast.Ann expr ty) = do

@@ -34,6 +34,7 @@ module Ast
   , pattern Ret
   , pattern If
   , pattern While
+  , pattern Loop
   , pattern Nop
   , pattern Ann
   , Typed(..)
@@ -44,13 +45,13 @@ where
 
 import qualified Ty
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
-import           Data.List                         ( isPrefixOf )
+import           Data.List                         ( isPrefixOf, intercalate )
 
 type Ast = [Item]
 type TypedAst = Typed [TypedItem]
 
 instance Show TypedAst where
-  show (items `HasTy` ty) = "Mod(" ++ show ty ++ "):\n" ++ (unlines $ map show items)
+  show (items `HasTy` ty) = "Mod(" ++ show ty ++ "):" ++ indent ("\n" ++ unlines (map show items))
 
 data ItemG e = Def String [(String, Ty.Ty)] (e, Maybe Ty.Ty)
 type Item = ItemG Expr
@@ -58,12 +59,16 @@ type TypedItem = Typed (ItemG TypedExpr)
 
 instance (Show e) => Show (ItemG e) where
   show (Def name paramsAndTys (body, Just retTy)) =
-    "def " ++ name ++ show paramsAndTys ++ " -> " ++ show retTy ++ " " ++ show body
+    "\ndef " ++ name ++ "[" ++ showParams paramsAndTys ++ "] -> " ++ show retTy ++ " " ++ show body
   show (Def name paramsAndTys (body, Nothing)) =
-    "def " ++ name ++ show paramsAndTys ++ " = " ++ show body
+    "\ndef " ++ name ++ "[" ++ showParams paramsAndTys ++ "] = " ++ indent (show body)
+
+showParams :: [(String, Ty.Ty)] -> String
+showParams params = intercalate ", " $ map pairFmt params
+  where pairFmt (param, ty) = param ++ ": " ++ show ty
 
 instance Show TypedItem where
-  show (item `HasTy` ty) = "Item(" ++ show ty ++ "): " ++ show item
+  show (item `HasTy` ty) = "Item(" ++ show ty ++ "):" ++ indent (show item)
 
 itemName :: ItemG e -> String
 itemName (Def name _ _) = name
@@ -132,6 +137,7 @@ data ExprF r
   | RetF r
   | IfF r r r
   | WhileF r r
+  | LoopF r
   | NopF
   | AnnF r Ty.Ty
 
@@ -142,6 +148,7 @@ type Expr = Fix ExprF
 isEndTerminatedExpr :: Expr -> Bool
 isEndTerminatedExpr (If _ _ _) = True
 isEndTerminatedExpr (While _ _) = True
+isEndTerminatedExpr (Loop _) = True
 isEndTerminatedExpr (Block _ _) = True
 isEndTerminatedExpr _ = False
 
@@ -169,6 +176,8 @@ pattern If :: Expr -> Expr -> Expr -> Expr
 pattern If cond yes no = Fix (IfF cond yes no)
 pattern While :: Expr -> Expr -> Expr
 pattern While cond body = Fix (WhileF cond body)
+pattern Loop :: Expr -> Expr
+pattern Loop body = Fix (LoopF body)
 pattern Nop :: Expr
 pattern Nop = Fix NopF
 pattern Ann :: Expr -> Ty.Ty -> Expr
@@ -178,6 +187,15 @@ data Typed a = a `HasTy` Ty.Ty
 data RecTyped f =  (f (RecTyped f)) `RecHasTy` Ty.Ty
 
 type TypedExpr = RecTyped ExprF
+
+indent :: String -> String
+indent txt = replace "\n" "\n  " txt
+  where 
+    -- From: https://programming-idioms.org/idiom/63/replace-fragment-of-a-string/976/haskell
+    replace _ _ [] = []
+    replace from to input = if isPrefixOf from input
+      then to ++ replace from to (drop (length from) input)
+      else head input : replace from to (tail input)
 
 instance (Show (f ExprF)) => Show (ExprF (f ExprF)) where
   show (VarF name) = name
@@ -199,24 +217,20 @@ instance (Show (f ExprF)) => Show (ExprF (f ExprF)) where
     RelOp Eq       -> show x ++ " == " ++ show y
     RelOp Neq      -> show x ++ " != " ++ show y
     OtherOp Concat -> show x ++ " ++ " ++ show y
-  show (BlockF isVoid es) =
-    "do(" ++ show isVoid ++ ")\n" ++ showInner ++ "end"
+  show (BlockF isVoid es) = "do" ++ indent ("\n" ++ showInner) ++ "\nend"
     where
-      -- From: https://programming-idioms.org/idiom/63/replace-fragment-of-a-string/976/haskell
-      replace _ _ [] = []
-      replace from to input = if isPrefixOf from input
-        then to ++ replace from to (drop (length from) input)
-        else head input : replace from to (tail input)
-      
       showInner =
-        unlines (map ((++";") . ("  "++) . (replace "\n" "\n  ") . show) es) 
+        case isVoid of
+          IsVoid -> intercalate ";\n" (map show es) ++ ";"
+          NotVoid -> intercalate ";\n" (map show es)
   show (CallF f args) = show f ++ show args
   show (IntrinsicF pos name args) = name ++ show args
   show (LetF name e) = "let " ++ name ++ " = " ++ show e
   show (AssignF name e) = name ++ " = " ++ show e
   show (RetF e) = "ret " ++ show e
-  show (IfF cond yes no) = "if " ++ show cond ++ " then\n" ++ show yes ++ "\nelse\n" ++ show no ++ "\nend"
+  show (IfF cond yes no) = "if " ++ show cond ++ " then\n" ++ indent (show yes) ++ "\nelse\n" ++ indent (show no) ++ "\nend"
   show (WhileF cond body) = "while " ++ show cond ++ " " ++ show body
+  show (LoopF body) = "loop " ++ show body
   show NopF = "nop"
   show (AnnF e t) = show e ++ ": " ++ show t
 

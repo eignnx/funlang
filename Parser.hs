@@ -31,6 +31,7 @@ languageDef = emptyDef
                             , "then"
                             , "else"
                             , "while"
+                            , "loop"
                             , "do"
                             , "end"
                             , "intr"
@@ -130,6 +131,12 @@ whileExpr = do
   body <- expression
   return $ Ast.While cond body
 
+loopExpr :: Parser Ast.Expr
+loopExpr = do
+  reserved "loop"
+  body <- expression
+  return $ Ast.Loop body
+
 nopExpr :: Parser Ast.Expr
 nopExpr = reserved "nop" *> return Ast.Nop
 
@@ -208,6 +215,7 @@ semiEndedTerm =  intrinsicExpr
 endEndedTerm =  blockExpr
             <|> ifExpr
             <|> whileExpr
+            <|> loopExpr
 
 semiEndedExpr = try nestedCalls <|> semiEndedTerm 
 endEndedExpr = endEndedTerm
