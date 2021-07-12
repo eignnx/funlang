@@ -25,7 +25,7 @@ data Value
   | VBool Bool
   | VString String
   | VInstrAddr InstrAddr
-  deriving Show
+  deriving (Show, Eq)
 
 displayValue :: Value -> IO ()
 displayValue (VInt    x) = print x

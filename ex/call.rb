@@ -1,16 +1,14 @@
-def id[x: Text] = x
-
 def str-join[a: Text, b: Text] -> Text do
-  ret id[a ++ b];
+  ret id[a ++ b]
 end
+
+def greet[name: Text] = say2["Hello ", name]
 
 def say2[thing1: Text, thing2: Text] -> Unit do
   intr.print[str-join[thing1, thing2]];
 end
 
-def greet[name: Text] = say2["Hello ", name]
-
-def count[] -> Never do
+def count[] do
   let n = 1;
   while true do
     intr.print[n];
@@ -24,6 +22,8 @@ def main[] do
   greet["Pippen"];
   intr.print[name] # Should print "Quincy"
 end
+
+def id[x: Text] = x
 
 # ===LIR===
 #   0: Const (VInstrAddr (InstrAddr 59))
