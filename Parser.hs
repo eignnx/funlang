@@ -1,3 +1,5 @@
+{-# LANGUAGE BlockArguments #-}
+
 module Parser
   ( parseString
   , parseSrc
@@ -245,10 +247,14 @@ blockExpr = do
   es <- many $ try terminatedExpr
   e <- optionMaybe expression
   reserved "end"
-  let (isVoid, exprs) = case e of
-                Just expr -> (Ast.NotVoid, es ++ [expr])
-                Nothing -> (Ast.IsVoid, es)
-  return $ Ast.Block isVoid exprs
+  return case e of
+    Just expr -> Ast.Block Ast.NotVoid (es ++ [expr])
+    Nothing | endsInEndTerminatedExpr es -> Ast.Block Ast.NotVoid es
+    _ -> Ast.Block Ast.IsVoid es
+  where
+    endsInEndTerminatedExpr [] = False
+    endsInEndTerminatedExpr (e:[]) = Ast.isEndTerminatedExpr e
+    endsInEndTerminatedExpr (_:es) = endsInEndTerminatedExpr es
 
 -- REPL Helper Functions
 parseString :: String -> Ast.Ast

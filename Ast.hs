@@ -21,6 +21,7 @@ module Ast
   , IsVoid(..)
   , Fix(..)
   , Expr
+  , isEndTerminatedExpr
   , pattern Var
   , pattern Literal
   , pattern Unary
@@ -138,6 +139,12 @@ newtype Fix f = Fix (f (Fix f))
 
 type Expr = Fix ExprF
 
+isEndTerminatedExpr :: Expr -> Bool
+isEndTerminatedExpr (If _ _ _) = True
+isEndTerminatedExpr (While _ _) = True
+isEndTerminatedExpr (Block _ _) = True
+isEndTerminatedExpr _ = False
+
 pattern Var :: String -> Expr
 pattern Var name = Fix (VarF name)
 pattern Literal :: Lit -> Expr
@@ -192,25 +199,29 @@ instance (Show (f ExprF)) => Show (ExprF (f ExprF)) where
     RelOp Eq       -> show x ++ " == " ++ show y
     RelOp Neq      -> show x ++ " != " ++ show y
     OtherOp Concat -> show x ++ " ++ " ++ show y
-  show (BlockF isVoid es) = "do\n" ++ unlines (map ((++";") . ("  "++) . (replace "\n" "\n  ") . show) es) ++ "end"
+  show (BlockF isVoid es) =
+    "do(" ++ show isVoid ++ ")\n" ++ showInner ++ "end"
     where
       -- From: https://programming-idioms.org/idiom/63/replace-fragment-of-a-string/976/haskell
       replace _ _ [] = []
       replace from to input = if isPrefixOf from input
         then to ++ replace from to (drop (length from) input)
         else head input : replace from to (tail input)
+      
+      showInner =
+        unlines (map ((++";") . ("  "++) . (replace "\n" "\n  ") . show) es) 
   show (CallF f args) = show f ++ show args
   show (IntrinsicF pos name args) = name ++ show args
   show (LetF name e) = "let " ++ name ++ " = " ++ show e
   show (AssignF name e) = name ++ " = " ++ show e
   show (RetF e) = "ret " ++ show e
   show (IfF cond yes no) = "if " ++ show cond ++ " then\n" ++ show yes ++ "\nelse\n" ++ show no ++ "\nend"
-  show (WhileF cond body) = "while " ++ show cond ++ " " ++ show body ++ "\nend"
+  show (WhileF cond body) = "while " ++ show cond ++ " " ++ show body
   show NopF = "nop"
   show (AnnF e t) = show e ++ ": " ++ show t
 
 instance Show TypedExpr where
-  show (e `RecHasTy` t) = "(" ++ show e ++ ") : " ++ show t
+  show (e `RecHasTy` t) = "(" ++ show e ++ " : " ++ show t ++ ")"
 
 instance Show Expr where
   show (Fix e) = show e

@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE LambdaCase #-}
 
 module TyCheck
   ( Res(..)
@@ -70,14 +71,6 @@ addError :: Res a -> String -> Res a
 addError (Ok a) _ = Ok a
 addError (Err err) errMsg = Err (ResultingError errMsg err)
 
-multiError :: [Res a] -> Res a
-multiError rs = Err $ go rs
-  where 
-    go ((Err e):[Ok _]) = e
-    go [Err e] = e
-    go ((Err e):es) = MultiError e (go es)
-    go ((Ok _):es) = go es
-
 data TyCheckerState = TyCheckerState { _ctx :: Ctx }
   deriving (Show)
 
@@ -109,19 +102,23 @@ instance CheckType Ast.Ast where
   type Checked Ast.Ast = Ast.TypedAst
 
   infer :: Ast.Ast -> TyChecker (Res Ast.TypedAst)
-  infer [] = return $ Ok $ ([] `HasTy` (ModTy M.empty))
-  infer (item:ast) = do
-    itemRes <- infer item
-    astRes  <- infer ast
-    case (itemRes, astRes) of
-      (Ok item'@(_ `HasTy` itemTy), Ok (ast' `HasTy` (ModTy m))) -> do
-        let name = Ast.itemName item
-        let m'   = M.insert name itemTy m
-        return $ Ok ((item':ast') `HasTy` ModTy m')
-      (Err e1, Err e2) -> return $ multiError [Err e1, Err e2]
-      (_, Err e) -> return $ Err e
-      (Err e, _) -> return $ Err e
-      _ -> error "Unexpected thing inside `infer @Ast.Ast`!"
+  infer items = do
+    skimItemDefs -- First, we need to put all top-level definitions into the Ctx.
+    itemsRes <- mapM infer items
+    case sequenceA itemsRes of
+      Ok items' -> do
+        let mkPair (item `HasTy` ty) = (Ast.itemName item, ty)
+        let modTy = ModTy $ M.fromList $ map mkPair items'
+        return $ Ok (items' `HasTy` modTy)
+      Err err -> return $ Err err
+    where
+      skimItemDefs =
+        forM_ items $ \case
+          Ast.Def name params (_, Just retTy) -> 
+            define name $ FnTy (map snd params) retTy
+          Ast.Def name params (_, Nothing) ->
+            -- Since we don't know the return type, we have to stub for now.
+            define name $ FnTy (map snd params) neverTy
 
   check [] (ModTy m) | m == M.empty = return $ Ok ([] `HasTy` ModTy m)
   check ast m = do
@@ -160,7 +157,9 @@ instance CheckType Ast.Item where
     case bodyRes of
       Ok typedBody@(_ `RecHasTy` bodyTy) -> do
         let def = Ast.Def name params (typedBody, Just bodyTy)
-        return $ Ok (def `HasTy` (FnTy paramTys bodyTy))
+        let ty = FnTy paramTys bodyTy
+        define name ty -- We MUST save the full type now.
+        return $ Ok (def `HasTy` ty)
       Err err -> return $ Err err
 
   check :: Ast.Item -> Ty -> TyChecker (Res Ast.TypedItem)
@@ -251,6 +250,8 @@ instance CheckType Ast.Expr where
 
   infer (Ast.Binary op@(Ast.ArithOp _) e1 e2)          = inferBinOp op intTy intTy e1 e2
   infer (Ast.Binary op@(Ast.BoolOp _) e1 e2)           = inferBinOp op boolTy boolTy e1 e2
+  infer (Ast.Binary op@(Ast.RelOp Ast.Eq) e1 e2)       = return $ Err $ RootCause msg
+    where msg = "I don't know how to infer the type of the `==` operator just yet. It's trickier than you'd think"
   infer (Ast.Binary op@(Ast.RelOp _) e1 e2)            = inferBinOp op intTy boolTy e1 e2
   infer (Ast.Binary op@(Ast.OtherOp Ast.Concat) e1 e2) = inferBinOp op textTy textTy e1 e2
 
@@ -360,7 +361,7 @@ instance CheckType Ast.Expr where
     case (yesRes, noRes) of
         (Ok (_ `RecHasTy` yesTy), _) -> check ifExpr yesTy -- Ensure yes-branch and entire expr have same type.
         (_, Ok (_ `RecHasTy` noTy)) -> check ifExpr noTy -- Ensure no-branch and entire expr have same type.
-        (e1, e2) -> return $ multiError [e1, e2] `addError` msg
+        (Err e1, Err e2) -> return $ Err (e1 <> e2) `addError` msg
           where msg = "I couldn't infer the type of the `if` expression `" ++ show ifExpr ++ "`"
 
   -- A while expression does NOT return the never type. This is because
@@ -373,7 +374,7 @@ instance CheckType Ast.Expr where
         (Ok cond', Ok body') -> do
           let while = Ast.WhileF cond' body'
           return $ Ok (while `RecHasTy` unitTy)
-        (res1, res2) -> return $ multiError [res1, res2] `addError` msg
+        (res1, res2) -> return $ (res1 *> res2) `addError` msg
           where msg = "I couldn't infer the type of the `while` expression"
 
   infer Ast.Nop = return $ Ok (Ast.NopF `RecHasTy` unitTy)
@@ -382,13 +383,23 @@ instance CheckType Ast.Expr where
     res <- check expr ty
     let rebuild expr' = (Ast.AnnF expr' ty `RecHasTy` ty)
     return $ (rebuild <$> res) `addError` msg
-      where msg = "Expression `" ++ show expr ++ "` does not have type `" ++ show ty ++ "`"
+      where msg = "The expression `" ++ show expr ++ "` does not have type `" ++ show ty ++ "`"
 
   -- Default case.
   infer expr = return $ Err $ RootCause $ msg
     where msg = "I don't have enough information to infer the type of `" ++ show expr ++ "`"
 
   check :: Ast.Expr -> Ty -> TyChecker (Res Ast.TypedExpr)
+
+  -- Check an equality expression: `e1 == e2`
+  check (Ast.Binary (Ast.RelOp Ast.Eq) e1 e2) ty | ty <: boolTy = do
+    res <- checkSameType e1 e2
+    case res of
+      Ok (e1', e2') -> do
+        let expr = Ast.BinaryF (Ast.RelOp Ast.Eq) e1' e2'
+        return $ res *> Ok (expr `RecHasTy` boolTy)
+      Err err -> return $ Err err `addError` msg
+        where msg = "The arguments to the `==` operator must have the same type, but they don't"
 
   check (Ast.If cond yes no) ty = do
     condRes <- check cond boolTy
@@ -399,10 +410,10 @@ instance CheckType Ast.Expr where
         let ifExpr = Ast.IfF cond' yes' no'
         return $ Ok (ifExpr `RecHasTy` ty)
       (condErr@(Err _), yesRes, noRes) ->
-        return $ multiError [condErr', yesRes, noRes]
+        return $ (condErr' <* yesRes <* noRes)
           where condErr' = condErr `addError` msg
                 msg = "The condition of an `if` must have type `" ++ show boolTy ++ "`, but this one doesn't"
-      (_, yesRes, noRes) -> return $ multiError [yesRes, noRes]
+      (_, yesRes, noRes) -> return $ (yesRes *> noRes)
 
 --   -- check ctx fn@(FnExpr param body) (FnTy paramTy retTy) =
 --   --   let pName = paramName param
@@ -445,9 +456,22 @@ instance CheckType Ast.Expr where
     return $ case exprRes of
       Ok expr'@(_ `RecHasTy` exprTy) | exprTy <: ty -> Ok expr'
       Ok (_ `RecHasTy` exprTy) -> Err $ RootCause msg
-        where msg = "Expression `" ++ show expr ++ "` has type `" ++ show exprTy ++ "`, not `" ++ show ty ++ "`"
+        where msg = "The expression `" ++ show expr ++ "` has type `" ++ show exprTy ++ "`, not `" ++ show ty ++ "`"
       err -> err `addError` msg
         where msg = "The expression `" ++ show expr ++ "` doesn't typecheck"
+
+checkSameType :: Ast.Expr -> Ast.Expr
+              -> TyChecker (Res (Ast.TypedExpr, Ast.TypedExpr))
+checkSameType e1 e2 = do
+  e1Res <- infer e1 -- What happens if we CAN'T infer e1, but CAN infer e2?
+  case e1Res of
+    Ok e1'@(_ `RecHasTy` ty1) -> do
+      e2Res <- check e2 ty1 -- Both args must be of same type.
+      case e2Res of
+        Ok e2' -> do
+          return $ Ok (e1', e2')
+        Err err -> return $ Err err
+    Err err -> return $ Err err
 
 astToTypedAst :: Ast.Ast -> Res Ast.TypedAst
 astToTypedAst ast = evalState (infer ast) initState

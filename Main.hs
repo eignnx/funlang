@@ -63,7 +63,7 @@ parseSrc :: Opts -> String -> IO Ast.Ast
 parseSrc opts src = do
   let ast = Parser.parseSrc (filename opts) src
   when (traceCompilation opts) $ do
-    putStrLn "===AST==="
+    putStrLn "\n===AST==="
     printAst ast
   return ast
 
@@ -72,11 +72,11 @@ astToTypedAst opts ast = do
   case TyCheck.astToTypedAst ast of
     TyCheck.Ok tast -> do
       when (traceCompilation opts) $ do
-        putStrLn "===TAST==="
+        putStrLn "\n===TAST==="
         printTypedAst tast
       return tast
     TyCheck.Err err -> do
-      putStrLn $ show err
+      putStrLn $ "\n===COMPILATION ERROR===\n" ++ show err ++ "\n======================="
       exitWith (ExitFailure 1)
 
 
@@ -84,7 +84,7 @@ tastToHir :: Opts -> Ast.TypedAst -> IO [Hir.Instr]
 tastToHir opts ast = do
   let hir = TypedAstToHir.astToHir ast
   when (traceCompilation opts) $ do
-    putStrLn "===HIR==="
+    putStrLn "\n===HIR==="
     printHir hir
   return hir
 
@@ -92,7 +92,7 @@ hirToLir :: Opts -> [Hir.Instr] -> IO [Lir.Instr]
 hirToLir opts hir = do
   let lir = ToLir.hirToLir hir
   when (traceCompilation opts) $ do
-    putStrLn "===LIR==="
+    putStrLn "\n===LIR==="
     printLir lir
   return lir
 

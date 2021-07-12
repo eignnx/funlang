@@ -132,6 +132,12 @@ stepIntBinOp op = do
   y <- popInt
   push $ Lir.VInt $ x `op` y
 
+stepSameTypeBoolBinOp :: (Lir.Value -> Lir.Value -> Bool) -> VmProgram ()
+stepSameTypeBoolBinOp op = do
+  x <- pop
+  y <- pop
+  push $ Lir.VBool $ x `op` y
+
 stepIntBoolBinOp :: (Int -> Int -> Bool) -> VmProgram ()
 stepIntBoolBinOp op = do
   x <- popInt
@@ -191,7 +197,7 @@ stepVm instr = do
     Lir.Neg -> do
       i <- popInt
       push (Lir.VInt (-i))
-    Lir.Eq  -> stepIntBoolBinOp (==)
+    Lir.Eq  -> stepSameTypeBoolBinOp (==)
     Lir.Gt  -> stepIntBoolBinOp (>)
     Lir.Lt  -> stepIntBoolBinOp (<)
     Lir.And -> stepBoolBinOp (&&)
