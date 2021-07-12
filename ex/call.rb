@@ -54,10 +54,6 @@ def str-join[a, b] do
   ret a ++ b;
 end
 
-def say2[thing1, thing2] do
-  intr.print[str-join[thing1, thing2]];
-end
-
 def main[] do
   let name = "Quincy"; # Local variable.
   greet["Digger"];
