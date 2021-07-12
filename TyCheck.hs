@@ -14,7 +14,7 @@ where
 
 import qualified Ast
 import           Ast           ( Typed(HasTy), RecTyped(RecHasTy) )
-import           Ty            ( Ty(..), (<:), neverTy, unitTy, boolTy, intTy, textTy )
+import           Ty            ( Ty(..), (<:), neverTy, voidTy, boolTy, intTy, textTy )
 import qualified Data.Map      as M
 import           Control.Monad ( foldM )
 import           Data.Semigroup
@@ -240,7 +240,7 @@ instance CheckType Ast.Expr where
   infer (Ast.Literal x) = do
     let lit = Ast.LiteralF x
     return $ case x of
-      Ast.Unit     -> Ok (lit `RecHasTy` unitTy)
+      Ast.Unit     -> Ok (lit `RecHasTy` voidTy)
       Ast.Bool _   -> Ok (lit `RecHasTy` boolTy)
       Ast.Int _    -> Ok (lit `RecHasTy` intTy)
       Ast.String _ -> Ok (lit `RecHasTy` textTy)
@@ -260,7 +260,7 @@ instance CheckType Ast.Expr where
     case exprsRes of
       Ok exprs' -> do
         let block = Ast.BlockF Ast.IsVoid exprs'
-        return $ Ok (block `RecHasTy` unitTy)
+        return $ Ok (block `RecHasTy` voidTy)
       Err err -> return $ Err err
   
   infer (Ast.Block Ast.NotVoid exprs) = do
@@ -268,7 +268,7 @@ instance CheckType Ast.Expr where
     case exprsRes of
       Ok [] -> do
         let block = Ast.BlockF Ast.NotVoid []
-        return $ Ok (block `RecHasTy` unitTy) -- An empty block has unit type.
+        return $ Ok (block `RecHasTy` voidTy) -- An empty block has Void type.
       Ok exprs -> do
         let block = Ast.BlockF Ast.NotVoid exprs
         let _ `RecHasTy` finalTy = last exprs
@@ -305,7 +305,7 @@ instance CheckType Ast.Expr where
     case argsRes of
       Ok args' -> do
         let intr = Ast.IntrinsicF loc name args'
-        let intrRetTy = unitTy -- FIXME: Cop-out for now.
+        let intrRetTy = voidTy -- FIXME: Cop-out for now.
         return $ Ok (intr `RecHasTy` intrRetTy)
       Err err -> return $ Err err
 
@@ -315,7 +315,7 @@ instance CheckType Ast.Expr where
       Ok expr'@(_ `RecHasTy` exprTy) -> do
         define name exprTy
         let letExpr = Ast.LetF name expr'
-        return $ Ok (letExpr `RecHasTy` unitTy)
+        return $ Ok (letExpr `RecHasTy` voidTy)
       err -> return $ err `addError` msg
         where msg = "The declaration of `" ++ name ++ "` needs a type annotation"
 
@@ -328,7 +328,7 @@ instance CheckType Ast.Expr where
         case exprRes of
           Ok expr' -> do
             let assign = Ast.AssignF name expr'
-            return $ Ok (assign `RecHasTy` unitTy)
+            return $ Ok (assign `RecHasTy` voidTy)
           err -> return $ err `addError` msg
             where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`\n   Hint: maybe you meant `let " ++ name ++ " = ...`"
       Err err -> return $ Err err `addError` msg
@@ -366,18 +366,18 @@ instance CheckType Ast.Expr where
 
   -- A while expression does NOT return the never type. This is because
   -- usually, it does not infinitely loop. It usually loops until the
-  -- condition is no longer true, then ends, yielding unit (void).
+  -- condition is no longer true, then ends, yielding void.
   infer (Ast.While cond body) = do
     condRes <- check cond boolTy
     bodyRes <- infer body
     case (condRes, bodyRes) of
         (Ok cond', Ok body') -> do
           let while = Ast.WhileF cond' body'
-          return $ Ok (while `RecHasTy` unitTy)
+          return $ Ok (while `RecHasTy` voidTy)
         (res1, res2) -> return $ (res1 *> res2) `addError` msg
           where msg = "I couldn't infer the type of the `while` expression"
 
-  infer Ast.Nop = return $ Ok (Ast.NopF `RecHasTy` unitTy)
+  infer Ast.Nop = return $ Ok (Ast.NopF `RecHasTy` voidTy)
 
   infer (Ast.Ann expr ty) = do
     res <- check expr ty
@@ -428,24 +428,24 @@ instance CheckType Ast.Expr where
 --   --   -- check ctx (App (FnExpr var body) binding) ty
 
   check (Ast.Let name expr) ty =
-    if ty == unitTy then do
+    if ty == voidTy then do
       res <- infer expr
       case res of
         Ok expr'@(_ `RecHasTy` exprTy) -> do
           define name exprTy
           let letExpr = Ast.LetF name expr'
-          return $ Ok (letExpr `RecHasTy` unitTy)
+          return $ Ok (letExpr `RecHasTy` voidTy)
         err -> return $ err `addError` msg
           where msg = "The declaration of `" ++ name ++ "` needs a type annotation"
     else
-      return $ Err $ RootCause ("A let declaration has type `" ++ show unitTy ++ "`")
+      return $ Err $ RootCause ("A let declaration has type `" ++ show voidTy ++ "`")
 
   check (Ast.Assign name expr) ty = do
     nameRes <- varLookup name
     case nameRes of
       Ok varTy -> do
         res <- check expr varTy
-        let rebuild expr' = Ast.AssignF name expr' `RecHasTy` unitTy
+        let rebuild expr' = Ast.AssignF name expr' `RecHasTy` voidTy
         return $ rebuild <$> res
       Err err -> return (Err err `addError` msg)
         where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`"

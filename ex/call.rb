@@ -4,7 +4,7 @@ end
 
 def greet[name: Text] = say2["Hello ", name]
 
-def say2[thing1: Text, thing2: Text] -> Unit do
+def say2[thing1: Text, thing2: Text] -> Void do
   intr.print[str-join[thing1, thing2]];
 end
 

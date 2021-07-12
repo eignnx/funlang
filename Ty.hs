@@ -2,7 +2,7 @@ module Ty
   ( Ty(..)
   , (<:)
   , neverTy
-  , unitTy
+  , voidTy
   , boolTy
   , intTy
   , textTy
@@ -32,7 +32,7 @@ _ <: _ = False
 
 -- TODO: use LANGUAGE PatternSynonyms: https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/pattern_synonyms.html
 neverTy = ValTy "Never"
-unitTy  = ValTy "Unit"
+voidTy  = ValTy "Void"
 boolTy  = ValTy "Bool"
 intTy   = ValTy "Int"
 textTy  = ValTy "Text"
