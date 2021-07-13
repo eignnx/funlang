@@ -1,11 +1,14 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 module Ty
-  ( Ty(..)
+  ( Ty( ..
+      , NeverTy
+      , VoidTy
+      , BoolTy
+      , IntTy
+      , TextTy
+      )
   , (<:)
-  , neverTy
-  , voidTy
-  , boolTy
-  , intTy
-  , textTy
   )
 where
 
@@ -24,15 +27,14 @@ instance Show Ty where
   show (ModTy m) = "{ " ++ intercalate ", " ((\(name, ty) -> name ++ ": " ++ show ty) <$> M.toList m) ++ " }"
 
 (<:) :: Ty -> Ty -> Bool
-never <: t2 | never == neverTy = True
+NeverTy <: t2 = True
 t1 <: t2 | t1 == t2 = True
 FnTy x1 y1 <: FnTy x2 y2 = all (\(x1', x2') -> x2' <: x1') (zip x1 x2) && y1 <: y2
 ModTy m1 <: ModTy m2 = m2 `M.isSubmapOf` m1
 _ <: _ = False
 
--- TODO: use LANGUAGE PatternSynonyms: https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/pattern_synonyms.html
-neverTy = ValTy "Never"
-voidTy  = ValTy "Void"
-boolTy  = ValTy "Bool"
-intTy   = ValTy "Int"
-textTy  = ValTy "Text"
+pattern NeverTy = ValTy "Never"
+pattern VoidTy  = ValTy "Void"
+pattern BoolTy  = ValTy "Bool"
+pattern IntTy   = ValTy "Int"
+pattern TextTy  = ValTy "Text"

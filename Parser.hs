@@ -105,7 +105,7 @@ def = do
   let exprTail = (do reservedOp "="
                      body <- expression
                      return $ Ast.Def name params (body, Nothing))
-  let blockTail = (do retTy <- option Ty.voidTy (reservedOp "->" *> ty) -- Without a ret ty, def defaults to returning Unit.
+  let blockTail = (do retTy <- option Ty.VoidTy (reservedOp "->" *> ty) -- Without a ret ty, def defaults to returning Unit.
                       body  <- blockExpr
                       return $ Ast.Def name params (body, Just retTy))
   exprTail <|> blockTail
