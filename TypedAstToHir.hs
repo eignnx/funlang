@@ -8,6 +8,8 @@ module TypedAstToHir
     )
 where
 
+import qualified Ty
+import           Ty                           ( (<:) )
 import qualified Ast
 import           Ast                          ( Typed(..), RecTyped(..) )
 import qualified Hir
@@ -74,13 +76,33 @@ instance Compile Ast.ArithOp where
 instance Compile Ast.OtherOp where
   compile Ast.Concat = return [Hir.Concat]
 
+-- | Checks for expressions whose type is not `Void`. If it finds any, inserts
+--   `Hir.Pop` afterwards to discard the value.
+compileTerminatedExprs :: [Ast.TypedExpr] -> CompState [Hir.Instr]
+compileTerminatedExprs exprs = do
+  hir <- forM exprs $ \expr@(_ `RecHasTy` exprTy) -> do
+    expr' <- compile expr
+    let maybePop = if exprTy <: Ty.VoidTy then [] else [Hir.Pop]
+    return $ expr' ++ maybePop
+  return $ concat hir
+
 instance Compile Ast.TypedExpr where
-  compile ((Ast.BlockF _isVoid []            ) `RecHasTy` ty) = return []
-  compile ((Ast.BlockF isVoid (expr : exprs)) `RecHasTy` ty) = do
-    expr'  <- compile expr
-    exprs' <- compile ((Ast.BlockF isVoid exprs) `RecHasTy` ty)
-    return $ expr' ++ exprs'
-  compile ((Ast.VarF     name ) `RecHasTy` ty) = return [Hir.Load name]
+
+  compile ((Ast.BlockF Ast.IsVoid exprs) `RecHasTy` ty) = compileTerminatedExprs exprs
+
+  compile ((Ast.BlockF Ast.NotVoid exprs) `RecHasTy` ty) = do
+    -- `exprs` is guarunteed to be non-empty by parser.
+    let (initExprs, lastExpr) = (init exprs, last exprs)
+    initExprs' <- compileTerminatedExprs initExprs
+    lastExpr' <- compile lastExpr
+    return $ initExprs' ++ lastExpr'
+
+  compile ((Ast.VarF name) `RecHasTy` ty) =
+    if ty <: Ty.VoidTy then
+      return []
+    else
+      return [Hir.Load name]
+
   compile ((Ast.LiteralF lit  ) `RecHasTy` ty) = return [Hir.Const (valueFromLit lit)]
   compile ((Ast.UnaryF op expr) `RecHasTy` ty) = do
     expr' <- compile expr
@@ -105,19 +127,31 @@ instance Compile Ast.TypedExpr where
            ++ fn' -- Code to load the function pointer
            ++ [Hir.Call argC]
 
+  -- Intercept the call to deal with `Void` specially. https://pbs.twimg.com/media/EU0GDTVU4AY73KC?format=jpg&name=small
+  compile intr@((Ast.IntrinsicF pos "print" [arg@(_ `RecHasTy` Ty.VoidTy)]) `RecHasTy` ty) = do
+    let intr = Intr.fromName "print" pos
+    return $  [ Hir.Const $ Hir.VString "<Void>"
+              , Hir.Intrinsic intr
+              ]
+
   compile ((Ast.IntrinsicF pos name args) `RecHasTy` ty) = do
     args' <- mapM compile args
     let intr = Intr.fromName name pos
     return $ join args' ++ [Hir.Intrinsic intr]
 
   compile (Ast.NopF `RecHasTy` ty)            = return [Hir.Nop]
-  compile ((Ast.AnnF expr _) `RecHasTy` ty)  = compile expr
-  compile ((Ast.LetF var expr) `RecHasTy` ty) = do
+  compile ((Ast.AnnF expr _) `RecHasTy` ty)   = compile expr
+
+  compile ((Ast.LetF var expr@(_ `RecHasTy` exprTy)) `RecHasTy` ty) = do
     expr' <- compile expr
-    return $ expr' ++ [Hir.Store var]
-  compile ((Ast.AssignF var expr) `RecHasTy` ty) = do
+    let maybeStore = if exprTy <: Ty.VoidTy then [] else [Hir.Store var]
+    return $ expr' ++ maybeStore
+
+  compile ((Ast.AssignF var expr@(_ `RecHasTy` exprTy)) `RecHasTy` ty) = do
     expr' <- compile expr
-    return $ expr' ++ [Hir.Store var]
+    let maybeStore = if exprTy <: Ty.VoidTy then [] else [Hir.Store var]
+    return $ expr' ++ maybeStore
+
   compile ((Ast.IfF cond yes no) `RecHasTy` ty) = do
     cond'  <- compile cond
     yes'   <- compile yes

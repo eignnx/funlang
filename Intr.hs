@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances, TypeFamilies #-}
+
 module Intr
   (Intrinsic(..)
   , fromName

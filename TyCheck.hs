@@ -6,6 +6,7 @@
 
 module TyCheck
   ( Res(..)
+  , Error(..)
   , CheckType(..)
   , initState
   , astToTypedAst
@@ -15,6 +16,7 @@ where
 import qualified Ast
 import           Ast           ( Typed(HasTy), RecTyped(RecHasTy) )
 import           Ty            ( Ty(..), (<:) )
+import qualified Intr
 import qualified Data.Map      as M
 import           Control.Monad ( foldM )
 import           Data.Semigroup
@@ -225,6 +227,25 @@ inferBinOp op argTy retTy e1 e2 = do
       (Ok e1', Ok e2') -> return $ Ok (Ast.BinaryF op e1' e2' `RecHasTy` retTy)
       (a, b) -> return (a *> b)
 
+instance CheckType (Intr.Intrinsic, [Ast.TypedExpr]) where
+
+  type Checked (Intr.Intrinsic, [Ast.TypedExpr]) =
+    Ast.Typed (Intr.Intrinsic, [Ast.TypedExpr])
+
+  infer (Intr.Print, args@[_ `RecHasTy` argTy]) = do
+    let printableTypes = [Ty.IntTy, Ty.BoolTy, Ty.TextTy, Ty.VoidTy]
+    if argTy `elem` printableTypes then do
+      return $ Ok ((Intr.Print, args) `HasTy` Ty.VoidTy)
+    else do
+      return $ Err $ RootCause msg
+        where msg = "The `print` intrinsic cannot be applied to type `" ++ show argTy ++ "`"
+
+  infer (Intr.Here pos, []) = return $ Ok $ (Intr.Here pos, []) `HasTy` Ty.VoidTy
+  infer (Intr.Exit, [])     = return $ Ok $ (Intr.Exit, []) `HasTy` Ty.NeverTy
+  infer (_, _)         = return $ Err $ RootCause "You passed the wrong number of arguments to an intrinsic"
+
+  check (_, [args]) = undefined
+
 instance CheckType Ast.Expr where
 
   type Checked Ast.Expr = Ast.TypedExpr
@@ -300,13 +321,17 @@ instance CheckType Ast.Expr where
                   expected = length argTys
                   received = length args
 
-  infer (Ast.Intrinsic loc name args) = do
+  infer expr@(Ast.Intrinsic loc name args) = do
     argsRes <- sequenceA <$> mapM infer args
     case argsRes of
       Ok args' -> do
-        let intr = Ast.IntrinsicF loc name args'
-        let intrRetTy = VoidTy -- FIXME: Cop-out for now.
-        return $ Ok (intr `RecHasTy` intrRetTy)
+        intrRes <- infer (Intr.fromName name loc, args')
+        case intrRes of
+          Ok (_ `HasTy` ty) -> do
+            let intr = Ast.IntrinsicF loc name args'
+            return $ Ok (intr `RecHasTy` ty)
+          Err err -> return $ Err err `addError` msg
+            where msg = "The intrinsic call `" ++ show expr ++ "` has a problem"
       Err err -> return $ Err err
 
   infer (Ast.Let name expr) = do
@@ -472,7 +497,7 @@ instance CheckType Ast.Expr where
       Ok (_ `RecHasTy` exprTy) -> Err $ RootCause msg
         where msg = "The expression `" ++ show expr ++ "` has type `" ++ show exprTy ++ "`, not `" ++ show ty ++ "`"
       err -> err `addError` msg
-        where msg = "The expression `" ++ show expr ++ "` doesn't typecheck"
+        where msg = "The expression\n```\n" ++ show expr ++ "\n```\ndoesn't typecheck"
 
 checkSameType :: Ast.Expr -> Ast.Expr
               -> TyChecker (Res (Ast.TypedExpr, Ast.TypedExpr))

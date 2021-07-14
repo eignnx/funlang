@@ -224,7 +224,7 @@ instance (Show (f ExprF)) => Show (ExprF (f ExprF)) where
           IsVoid -> intercalate ";\n" (map show es) ++ ";"
           NotVoid -> intercalate ";\n" (map show es)
   show (CallF f args) = show f ++ show args
-  show (IntrinsicF pos name args) = name ++ show args
+  show (IntrinsicF pos name args) = "intr." ++ name ++ show args
   show (LetF name e) = "let " ++ name ++ " = " ++ show e
   show (AssignF name e) = name ++ " = " ++ show e
   show (RetF e) = "ret " ++ show e
