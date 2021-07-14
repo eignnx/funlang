@@ -8,7 +8,7 @@ end
 
 def main[] do
   "in main";
-  let x = f[]; # Should be compilation error!
+  let x = f[];
   intr.print[x]; # Should NOT print anything!
 end
 
