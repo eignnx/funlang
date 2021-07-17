@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module Ast
   ( Ast
@@ -18,10 +19,10 @@ module Ast
   , Lit(..)
   , UnaryOp(..)
   , ExprF(..)
-  , IsVoid(..)
   , Fix(..)
+  , Seq(..)
   , Expr
-  , isEndTerminatedExpr
+  , isEndTerminated
   , pattern Var
   , pattern Literal
   , pattern Unary
@@ -116,8 +117,35 @@ data UnaryOp
   | Neg
   deriving (Show)
 
-data IsVoid = IsVoid | NotVoid
-  deriving (Show)
+-- | Represends a `do ... end` block.
+--   The block:
+--   ```
+--   do
+--     f[];
+--     g[]
+--   end
+--   ```
+--  translates to: `Semi g[] (Result g[])`.
+--  The block:
+--   ```
+--   do
+--     f[];
+--     g[];
+--   end
+--   ```
+--  translates to: `Semi g[] (Semi g[] Empty)`.
+--  The block `do end` translates to: `Empty`.
+data Seq e         -- <sequence> -->
+  = Empty          --            | lookahead{END}
+  | Result e       --            | <expr>
+  | Semi e (Seq e) --            | <expr> SEMICOLON <sequence>
+
+instance (IsEndTerminated e, Show e) => Show (Seq e)  where
+  show Empty = ""
+  show (Result e) = show e
+  show (Semi e seq)
+    | isEndTerminated e = show e ++ "\n" ++ show seq
+    | otherwise = show e ++ ";\n" ++ show seq
 
 -- This type used to be called `Expr` (see [this commit](1)), but was rewritten
 -- to use an F-Algebra (I think that's right?), and backwards-compatible
@@ -129,7 +157,7 @@ data ExprF r
   | LiteralF Lit
   | UnaryF UnaryOp r
   | BinaryF BinOp r r
-  | BlockF IsVoid [r]
+  | BlockF (Seq r)
   | CallF r [r]
   | IntrinsicF Parsec.SourcePos String [r]
   | LetF String r
@@ -142,15 +170,27 @@ data ExprF r
   | AnnF r Ty.Ty
 
 newtype Fix f = Fix (f (Fix f))
+unfix :: Fix f -> f (Fix f)
+unfix (Fix f) = f
 
 type Expr = Fix ExprF
 
-isEndTerminatedExpr :: Expr -> Bool
-isEndTerminatedExpr (If _ _ _) = True
-isEndTerminatedExpr (While _ _) = True
-isEndTerminatedExpr (Loop _) = True
-isEndTerminatedExpr (Block _ _) = True
-isEndTerminatedExpr _ = False
+class IsEndTerminated a where
+  isEndTerminated :: a -> Bool
+
+instance IsEndTerminated Expr where
+  isEndTerminated e = isEndTerminated $ unfix e
+
+instance IsEndTerminated TypedExpr where
+  isEndTerminated e = isEndTerminated $ unRecTyped e
+
+instance IsEndTerminated (ExprF f) where
+  isEndTerminated (IfF _ _ _) = True
+  isEndTerminated (WhileF _ _) = True
+  isEndTerminated (LoopF _) = True
+  isEndTerminated (BlockF _) = True
+  isEndTerminated _ = False
+
 
 pattern Var :: String -> Expr
 pattern Var name = Fix (VarF name)
@@ -160,8 +200,8 @@ pattern Unary :: UnaryOp -> Expr -> Expr
 pattern Unary op x = Fix (UnaryF op x)
 pattern Binary :: BinOp -> Expr -> Expr -> Expr
 pattern Binary op x y = Fix (BinaryF op x y)
-pattern Block :: IsVoid -> [Expr] -> Expr
-pattern Block v es = Fix (BlockF v es)
+pattern Block :: Seq Expr -> Expr
+pattern Block seq = Fix (BlockF seq)
 pattern Call :: Expr -> [Expr] -> Expr
 pattern Call f args = Fix (CallF f args)
 pattern Intrinsic :: Parsec.SourcePos -> String -> [Expr] -> Expr
@@ -186,6 +226,9 @@ pattern Ann expr ty = Fix (AnnF expr ty)
 data Typed a = a `HasTy` Ty.Ty
 data RecTyped f =  (f (RecTyped f)) `RecHasTy` Ty.Ty
 
+unRecTyped :: RecTyped f -> f (RecTyped f)
+unRecTyped (f `RecHasTy` _) = f
+
 type TypedExpr = RecTyped ExprF
 
 indent :: String -> String
@@ -197,7 +240,7 @@ indent txt = replace "\n" "\n  " txt
       then to ++ replace from to (drop (length from) input)
       else head input : replace from to (tail input)
 
-instance (Show (f ExprF)) => Show (ExprF (f ExprF)) where
+instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) where
   show (VarF name) = name
   show (LiteralF (Int x)) = show x
   show (LiteralF (Bool x)) = if x then "true" else "false"
@@ -217,18 +260,14 @@ instance (Show (f ExprF)) => Show (ExprF (f ExprF)) where
     RelOp Eq       -> show x ++ " == " ++ show y
     RelOp Neq      -> show x ++ " != " ++ show y
     OtherOp Concat -> show x ++ " ++ " ++ show y
-  show (BlockF isVoid es) = "do" ++ indent ("\n" ++ showInner) ++ "\nend"
-    where
-      showInner =
-        case isVoid of
-          IsVoid -> intercalate ";\n" (map show es) ++ ";"
-          NotVoid -> intercalate ";\n" (map show es)
+  show (BlockF Empty) = "do end"
+  show (BlockF seq) = "do" ++ indent ("\n" ++ show seq) ++ "\nend"
   show (CallF f args) = show f ++ show args
   show (IntrinsicF pos name args) = "intr." ++ name ++ show args
   show (LetF name e) = "let " ++ name ++ " = " ++ show e
   show (AssignF name e) = name ++ " = " ++ show e
   show (RetF e) = "ret " ++ show e
-  show (IfF cond yes no) = "if " ++ show cond ++ " then\n" ++ indent (show yes) ++ "\nelse\n" ++ indent (show no) ++ "\nend"
+  show (IfF cond yes no) = "if " ++ show cond ++ " then" ++ indent ("\n" ++ show yes) ++ "\nelse" ++ indent ("\n" ++ show no) ++ "\nend"
   show (WhileF cond body) = "while " ++ show cond ++ " " ++ show body
   show (LoopF body) = "loop " ++ show body
   show NopF = "nop"

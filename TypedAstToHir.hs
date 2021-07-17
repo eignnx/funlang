@@ -86,16 +86,25 @@ compileTerminatedExprs exprs = do
     return $ expr' ++ maybePop
   return $ concat hir
 
+instance Compile (Ast.Seq Ast.TypedExpr) where
+  
+  compile (Ast.Empty) = return []
+
+  compile (Ast.Result expr) = compile expr
+
+  compile (Ast.Semi expr@(_ `RecHasTy` ty) seq)
+    | ty <: Ty.VoidTy = do -- Already Void type, no need to Pop.
+      expr' <- compile expr
+      seq' <- compile seq
+      return $ expr' ++ seq'
+    | otherwise = do -- This one needs to discard its non-Void result.
+      expr' <- compile expr
+      seq' <- compile seq
+      return $ expr' ++ [Hir.Pop] ++ seq'
+
 instance Compile Ast.TypedExpr where
 
-  compile ((Ast.BlockF Ast.IsVoid exprs) `RecHasTy` ty) = compileTerminatedExprs exprs
-
-  compile ((Ast.BlockF Ast.NotVoid exprs) `RecHasTy` ty) = do
-    -- `exprs` is guarunteed to be non-empty by parser.
-    let (initExprs, lastExpr) = (init exprs, last exprs)
-    initExprs' <- compileTerminatedExprs initExprs
-    lastExpr' <- compile lastExpr
-    return $ initExprs' ++ lastExpr'
+  compile ((Ast.BlockF seq) `RecHasTy` ty) = compile seq
 
   compile ((Ast.VarF name) `RecHasTy` ty) =
     if ty <: Ty.VoidTy then
@@ -127,6 +136,7 @@ instance Compile Ast.TypedExpr where
            ++ fn' -- Code to load the function pointer
            ++ [Hir.Call argC]
 
+  -- FIXME: HACK!
   -- Intercept the call to deal with `Void` specially. https://pbs.twimg.com/media/EU0GDTVU4AY73KC?format=jpg&name=small
   compile intr@((Ast.IntrinsicF pos "print" [arg@(_ `RecHasTy` Ty.VoidTy)]) `RecHasTy` ty) = do
     let intr = Intr.fromName "print" pos

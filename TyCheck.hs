@@ -246,6 +246,36 @@ instance CheckType (Intr.Intrinsic, [Ast.TypedExpr]) where
 
   check (_, [args]) = undefined
 
+instance CheckType (Ast.Seq Ast.Expr) where
+
+  type Checked (Ast.Seq Ast.Expr) = (Ast.Seq Ast.TypedExpr, Ty)
+
+  infer (Ast.Empty) = return $ Ok (Ast.Empty, VoidTy)
+
+  infer (Ast.Result e) = do
+    eRes <- infer e
+    case eRes of
+      Ok e'@(_ `RecHasTy` ty) -> do
+        let result = Ast.Result e'
+        return $ Ok (result, ty)
+
+  infer (Ast.Semi e seq) = do
+    eRes <- infer e
+    seqRes <- infer seq
+    case (eRes, seqRes) of
+      (Ok e'@(_ `RecHasTy` NeverTy), Ok (seq', seqTy)) -> do
+        let semi = Ast.Semi e' seq'
+        return $ Ok (semi, NeverTy)
+      (Ok e', Ok (seq', NeverTy)) -> do
+        let semi = Ast.Semi e' seq'
+        return $ Ok (semi, NeverTy)
+      (Ok e', Ok (seq', seqTy)) -> do
+        let semi = Ast.Semi e' seq'
+        return $ Ok (semi, seqTy)
+      _ -> return (eRes *> seqRes)
+
+  check = undefined
+
 instance CheckType Ast.Expr where
 
   type Checked Ast.Expr = Ast.TypedExpr
@@ -276,25 +306,28 @@ instance CheckType Ast.Expr where
   infer (Ast.Binary op@(Ast.RelOp _) e1 e2)            = inferBinOp op IntTy BoolTy e1 e2
   infer (Ast.Binary op@(Ast.OtherOp Ast.Concat) e1 e2) = inferBinOp op TextTy TextTy e1 e2
 
-  infer (Ast.Block Ast.IsVoid exprs) = do
-    exprsRes <- sequenceA <$> mapM infer exprs
-    case exprsRes of
-      Ok exprs' -> do
-        let block = Ast.BlockF Ast.IsVoid exprs'
-        return $ Ok (block `RecHasTy` VoidTy)
+  infer (Ast.Block seq) = do
+    seqRes <- infer seq
+    case seqRes of
+      Ok (seq', ty) -> return $ Ok $ Ast.BlockF seq' `RecHasTy` ty
       Err err -> return $ Err err
-  
-  infer (Ast.Block Ast.NotVoid exprs) = do
-    exprsRes <- sequenceA <$> mapM infer exprs
-    case exprsRes of
-      Ok [] -> do
-        let block = Ast.BlockF Ast.NotVoid []
-        return $ Ok (block `RecHasTy` VoidTy) -- An empty block has Void type.
-      Ok exprs -> do
-        let block = Ast.BlockF Ast.NotVoid exprs
-        let _ `RecHasTy` finalTy = last exprs
-        return $ Ok (block `RecHasTy` finalTy)
-      Err err -> return $ Err err
+      -- where
+      --   process :: [Ast.Expr] -> TyChecker (Res Ast.TypedExpr)
+      --   process [] = return $ Ok $ Ast.BlockF Ast.NotVoid [] `RecHasTy` VoidTy
+      --   process (expr:exprs) = do
+      --     exprRes <- infer expr
+      --     exprsRes <- sequenceA <$> mapM infer exprs
+      --     case (exprRes, exprsRes) of
+
+      --       (Ok expr'@(_ `RecHasTy` NeverTy), Ok exprs') -> do
+      --         let block = Ast.BlockF Ast.NotVoid (expr':exprs')
+      --         return $ Ok $ block `RecHasTy` NeverTy
+
+      --       (Ok expr', Ok exprs') -> do
+      --         return $ Ok _
+
+      --       _ -> return $ exprRes *> exprsRes
+                
 
   infer (Ast.Call fn args) = do
     fnRes <- infer fn

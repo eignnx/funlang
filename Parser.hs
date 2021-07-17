@@ -249,20 +249,23 @@ literal =
   boolean =
     (reserved "true" >> return True) <|> (reserved "false" >> return False)
 
+seqTerminatedBy :: Parser a -> Parser (Ast.Seq Ast.Expr)
+seqTerminatedBy end
+  -- First case: terminatedExpr IMMEDIATELY FOLLOWED BY end, should be put in
+  -- `Ast.Result`, NOT `Ast.Semi _ Ast.End`. This allows `if` exprs to appear
+  -- at the end of a block and return their result without looking like they
+  -- return `Void`.
+  =   try (Ast.Result <$> (terminatedExpr <* lookAhead end))
+  <|> try (Ast.Semi <$> terminatedExpr <*> seqTerminatedBy end)
+  <|> (Ast.Result <$> (expression <* lookAhead end))
+  <|> (lookAhead end *> return Ast.Empty)
+
 blockExpr :: Parser Ast.Expr
 blockExpr = do
   reserved "do"
-  es <- many $ try terminatedExpr
-  e <- optionMaybe expression
+  seq <- seqTerminatedBy (reserved "end")
   reserved "end"
-  return case e of
-    Just expr -> Ast.Block Ast.NotVoid (es ++ [expr])
-    Nothing | endsInEndTerminatedExpr es -> Ast.Block Ast.NotVoid es
-    _ -> Ast.Block Ast.IsVoid es
-  where
-    endsInEndTerminatedExpr [] = False
-    endsInEndTerminatedExpr (e:[]) = Ast.isEndTerminatedExpr e
-    endsInEndTerminatedExpr (_:es) = endsInEndTerminatedExpr es
+  return $ Ast.Block seq
 
 -- REPL Helper Functions
 parseString :: String -> Ast.Ast
