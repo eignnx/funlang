@@ -15,15 +15,13 @@ where
 
 import qualified Ast
 import           Ast           ( Typed(HasTy), RecTyped(RecHasTy) )
-import           Ty            ( Ty(..), (<:) )
+import           Ty            ( Ty(..), (<:), (-&&>) )
 import qualified Intr
 import qualified Data.Map      as M
 import           Control.Monad ( foldM )
 import           Data.Semigroup
 import           Control.Monad.State
 import           Control.Applicative
-
-type Ctx = M.Map String Ty
 
 data Res a
   = Ok a
@@ -73,7 +71,10 @@ addError :: Res a -> String -> Res a
 addError (Ok a) _ = Ok a
 addError (Err err) errMsg = Err (ResultingError errMsg err)
 
-data TyCheckerState = TyCheckerState { _ctx :: Ctx }
+type Ctx = M.Map String Ty
+
+data TyCheckerState
+  = TyCheckerState { _ctx :: Ctx }
   deriving (Show)
 
 initState :: TyCheckerState
@@ -88,12 +89,23 @@ define name ty = do
   modify $ \st -> st { _ctx = ctx' }
   return ty
 
+setFnRetTy :: Ty -> TyChecker Ty
+setFnRetTy ty = do
+  define "#ret" ty
+
 varLookup :: String -> TyChecker (Res Ty)
 varLookup name = do
   ctx <- gets _ctx
   let reason = RootCause ("The variable `" ++ name ++ "` is not declared anywhere.")
   let res = toRes (M.lookup name ctx) reason
   return res
+
+getFnRetTy :: TyChecker Ty
+getFnRetTy = do
+  ctx <- gets _ctx
+  case M.lookup "#ret" ctx of
+    Just ty -> return ty
+    Nothing -> error "Internal Compiler Error: couldn't find `#ret` in `ctx`!"
 
 class CheckType a where
   type Checked a :: *
@@ -138,6 +150,7 @@ instance CheckType Ast.Item where
 
   -- For when the return type IS specified.
   infer (Ast.Def name params (body, Just retTy)) = do
+    setFnRetTy retTy -- Set fn's return type.
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
       define param paramTy
@@ -151,6 +164,7 @@ instance CheckType Ast.Item where
 
   -- For when the return type is NOT specified.
   infer (Ast.Def name params (body, Nothing)) = do
+    setFnRetTy NeverTy -- We don't know the fn's return type yet! FIXME: seems bad...
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
       define param paramTy
@@ -233,15 +247,15 @@ instance CheckType (Intr.Intrinsic, [Ast.TypedExpr]) where
     Ast.Typed (Intr.Intrinsic, [Ast.TypedExpr])
 
   infer (Intr.Print, args@[_ `RecHasTy` argTy]) = do
-    let printableTypes = [Ty.IntTy, Ty.BoolTy, Ty.TextTy, Ty.VoidTy]
-    if argTy `elem` printableTypes then do
-      return $ Ok ((Intr.Print, args) `HasTy` Ty.VoidTy)
+    let printableTypes = [IntTy, BoolTy, TextTy, VoidTy]
+    if any (argTy <:) printableTypes then do
+      return $ Ok ((Intr.Print, args) `HasTy` (argTy -&&> VoidTy))
     else do
       return $ Err $ RootCause msg
         where msg = "The `print` intrinsic cannot be applied to type `" ++ show argTy ++ "`"
 
-  infer (Intr.Here pos, []) = return $ Ok $ (Intr.Here pos, []) `HasTy` Ty.VoidTy
-  infer (Intr.Exit, [])     = return $ Ok $ (Intr.Exit, []) `HasTy` Ty.NeverTy
+  infer (Intr.Here pos, []) = return $ Ok $ (Intr.Here pos, []) `HasTy` VoidTy
+  infer (Intr.Exit, [])     = return $ Ok $ (Intr.Exit, []) `HasTy` NeverTy
   infer (_, _)         = return $ Err $ RootCause "You passed the wrong number of arguments to an intrinsic"
 
   check (_, [args]) = undefined
@@ -258,20 +272,15 @@ instance CheckType (Ast.Seq Ast.Expr) where
       Ok e'@(_ `RecHasTy` ty) -> do
         let result = Ast.Result e'
         return $ Ok (result, ty)
+      Err err -> return $ Err err
 
   infer (Ast.Semi e seq) = do
     eRes <- infer e
     seqRes <- infer seq
     case (eRes, seqRes) of
-      (Ok e'@(_ `RecHasTy` NeverTy), Ok (seq', seqTy)) -> do
+      (Ok e'@(_ `RecHasTy` eTy), Ok (seq', seqTy)) -> do
         let semi = Ast.Semi e' seq'
-        return $ Ok (semi, NeverTy)
-      (Ok e', Ok (seq', NeverTy)) -> do
-        let semi = Ast.Semi e' seq'
-        return $ Ok (semi, NeverTy)
-      (Ok e', Ok (seq', seqTy)) -> do
-        let semi = Ast.Semi e' seq'
-        return $ Ok (semi, seqTy)
+        return $ Ok (semi, eTy -&&> seqTy)
       _ -> return (eRes *> seqRes)
 
   check = undefined
@@ -306,53 +315,53 @@ instance CheckType Ast.Expr where
   infer (Ast.Binary op@(Ast.RelOp _) e1 e2)            = inferBinOp op IntTy BoolTy e1 e2
   infer (Ast.Binary op@(Ast.OtherOp Ast.Concat) e1 e2) = inferBinOp op TextTy TextTy e1 e2
 
+  -- This `infer` impl simply defers to `instance CheckType (Ast.Seq Ast.Expr)`.
   infer (Ast.Block seq) = do
     seqRes <- infer seq
     case seqRes of
       Ok (seq', ty) -> return $ Ok $ Ast.BlockF seq' `RecHasTy` ty
       Err err -> return $ Err err
-      -- where
-      --   process :: [Ast.Expr] -> TyChecker (Res Ast.TypedExpr)
-      --   process [] = return $ Ok $ Ast.BlockF Ast.NotVoid [] `RecHasTy` VoidTy
-      --   process (expr:exprs) = do
-      --     exprRes <- infer expr
-      --     exprsRes <- sequenceA <$> mapM infer exprs
-      --     case (exprRes, exprsRes) of
 
-      --       (Ok expr'@(_ `RecHasTy` NeverTy), Ok exprs') -> do
-      --         let block = Ast.BlockF Ast.NotVoid (expr':exprs')
-      --         return $ Ok $ block `RecHasTy` NeverTy
-
-      --       (Ok expr', Ok exprs') -> do
-      --         return $ Ok _
-
-      --       _ -> return $ exprRes *> exprsRes
-                
-
+  -- The runtime imposes the following order on the execution of a `Call`
+  -- expression:
+  --   1. The arguments are evaluated, (arbitrarily) right to left,
+  --   2. The callable is evaluated, then
+  --   3. The call is performed.
+  -- This means that in the call `f[a, b]`, the execution sequence is `a; b; f`.
+  -- So if any of `a`, `b`, or `f` have type `Never`, the entire expression does
+  -- as well. The type of the `Call` expression is `a -&&> b -&&> f -&&> retTy`.
+  --
+  -- HOWEVER: While type-checking, we must FIRST infer the type of `f`, THEN
+  -- check that the inferred types of the arguments match `f`'s parameter types.
   infer (Ast.Call fn args) = do
     fnRes <- infer fn
     case fnRes of
-      Ok fn'@(_ `RecHasTy` FnTy argTys retTy) -> do
-        argsRes <- checkArgs fn args argTys
+      Ok fn'@(_ `RecHasTy` FnTy paramTys retTy) -> do
+        argsRes <- checkArgs paramTys
         case argsRes of
           Ok args' -> do
             let call = Ast.CallF fn' args'
-            return $ Ok (call `RecHasTy` retTy)
+            let argsExeTy = foldr (-&&>) VoidTy (map (\(RecHasTy _ ty) -> ty) args')
+            return $ Ok (call `RecHasTy` (argsExeTy -&&> retTy))
           Err err -> return $ Err err
+      Ok fn'@(_ `RecHasTy` NeverTy) -> do
+        -- Oops! Well, let's make the best of it. Try inferring args.
+        argsRes <- sequenceA <$> mapM infer args
+        let rebuild args' = Ast.CallF fn' args' `RecHasTy` NeverTy
+        return $ rebuild <$> argsRes
       Ok (_ `RecHasTy` nonFnTy) -> return $ Err $ RootCause $ msg
         where msg = "`" ++ show fn ++ "` is a `" ++ show nonFnTy ++ "`, not a function"
       err -> return err
-      where
-        checkArgs :: Ast.Expr -> [Ast.Expr] -> [Ty] -> TyChecker (Res [Ast.TypedExpr])
-        checkArgs fn args argTys | length args == length argTys = do
-          argsCheckRes <- sequenceA <$> zipWithM check args argTys -- Check that the args have right types.
-          return $ argsCheckRes
-        checkArgs fn args argTys = do -- Wrong number of args provided.
-          return $ Err $ RootCause msg
-            where msg = "Oops! You passed " ++ show received ++ " arguments to `"
-                      ++ show fn ++ "`, but it expects " ++ show expected
-                  expected = length argTys
-                  received = length args
+    where
+      checkArgs :: [Ty] -> TyChecker (Res [Ast.TypedExpr])
+      checkArgs argTys | length args == length argTys = do
+        sequenceA <$> zipWithM check args argTys -- Check that the args have right types.
+      checkArgs argTys = do -- Wrong number of args provided.
+        return $ Err $ RootCause msg
+          where msg = "Oops! You passed " ++ show received ++ " arguments to `"
+                    ++ show fn ++ "`, but it expects " ++ show expected
+                expected = length argTys
+                received = length args
 
   infer expr@(Ast.Intrinsic loc name args) = do
     argsRes <- sequenceA <$> mapM infer args
@@ -373,31 +382,32 @@ instance CheckType Ast.Expr where
       Ok expr'@(_ `RecHasTy` exprTy) -> do
         define name exprTy
         let letExpr = Ast.LetF name expr'
-        return $ Ok (letExpr `RecHasTy` VoidTy)
+        return $ Ok (letExpr `RecHasTy` (exprTy -&&> VoidTy))
       err -> return $ err `addError` msg
         where msg = "The declaration of `" ++ name ++ "` needs a type annotation"
 
   infer (Ast.Assign name expr) = do
-    -- "\n   Hint: maybe you meant `let " ++ name ++ " = ...`"
     varRes <- varLookup name
     case varRes of
       Ok varTy -> do
         exprRes <- check expr varTy
         case exprRes of
-          Ok expr' -> do
+          Ok expr'@(_ `RecHasTy` exprTy) -> do
             let assign = Ast.AssignF name expr'
-            return $ Ok (assign `RecHasTy` VoidTy)
+            return $ Ok (assign `RecHasTy` (exprTy -&&> VoidTy))
           err -> return $ err `addError` msg
-            where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`\n   Hint: maybe you meant `let " ++ name ++ " = ...`"
+            where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`"
       Err err -> return $ Err err `addError` msg
         where msg = "I can't assign to the undeclared variable `" ++ name ++ "`"
 
   infer (Ast.Ret expr) = do
-    exprRes <- infer expr
+    fnRetTy <- getFnRetTy
+    exprRes <- check expr fnRetTy
     case exprRes of
-      Ok expr' -> do
+      Ok expr'@(_ `RecHasTy` exprTy) -> do
         let ret = Ast.RetF expr'
-        return $ Ok (ret `RecHasTy` NeverTy)
+        -- The `-&&>` shouldn't be necessary here, but whatever.
+        return $ Ok (ret `RecHasTy` (exprTy -&&> NeverTy))
       err -> return err
 
 --   -- infer ctx (FnExpr (AnnParam param paramTy) body) =
@@ -429,9 +439,9 @@ instance CheckType Ast.Expr where
     condRes <- check cond BoolTy
     bodyRes <- check body VoidTy -- Body ought to have type Void.
     case (condRes, bodyRes) of
-        (Ok cond', Ok body'@(_ `RecHasTy` bodyTy)) -> do
+        (Ok cond'@(_ `RecHasTy` condTy), Ok body'@(_ `RecHasTy` bodyTy)) -> do
           let while = Ast.WhileF cond' body'
-          return $ Ok (while `RecHasTy` bodyTy)
+          return $ Ok (while `RecHasTy` (condTy -&&> bodyTy))
         (res1, res2) -> do
           return $ (res1 `addError` msg1) *> (res2 `addError` msg2)
           where msg1 = "The condition of this `while` loop doesn't have type `" ++ show BoolTy ++ "`"
@@ -470,14 +480,18 @@ instance CheckType Ast.Expr where
       Err err -> return $ Err err `addError` msg
         where msg = "The arguments to the `==` operator must have the same type, but they don't"
 
+  -- An `if` expression has two sequentially-executed sub-expressions:
+  --  1. The conditional expression, and
+  --  2. (One of) the branches.
+  -- Therefore, the type of an `if` expression ought to be `condTy -&&> branchTy`.
   check (Ast.If cond yes no) ty = do
     condRes <- check cond BoolTy
     yesRes <- check yes ty
     noRes <- check no ty
     case (condRes, yesRes, noRes) of
-      (Ok cond', Ok yes', Ok no') -> do
+      (Ok cond'@(_ `RecHasTy` condTy), Ok yes', Ok no') -> do
         let ifExpr = Ast.IfF cond' yes' no'
-        return $ Ok (ifExpr `RecHasTy` ty)
+        return $ Ok (ifExpr `RecHasTy` (condTy -&&> ty))
       (condErr@(Err _), yesRes, noRes) ->
         return $ (condErr' <* yesRes <* noRes)
           where condErr' = condErr `addError` msg
@@ -503,7 +517,7 @@ instance CheckType Ast.Expr where
         Ok expr'@(_ `RecHasTy` exprTy) -> do
           define name exprTy
           let letExpr = Ast.LetF name expr'
-          return $ Ok (letExpr `RecHasTy` VoidTy)
+          return $ Ok (letExpr `RecHasTy` (exprTy -&&> VoidTy))
         err -> return $ err `addError` msg
           where msg = "The declaration of `" ++ name ++ "` needs a type annotation"
     else
@@ -515,8 +529,9 @@ instance CheckType Ast.Expr where
       case nameRes of
         Ok varTy -> do
           res <- check expr varTy
-          let rebuild expr' = Ast.AssignF name expr' `RecHasTy` VoidTy
           return $ rebuild <$> res
+            where rebuild expr'@(_ `RecHasTy` exprTy) =
+                    Ast.AssignF name expr' `RecHasTy` (exprTy -&&> VoidTy)
         Err err -> return (Err err `addError` msg)
           where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`"
     else
@@ -528,7 +543,7 @@ instance CheckType Ast.Expr where
     return $ case exprRes of
       Ok expr'@(_ `RecHasTy` exprTy) | exprTy <: ty -> Ok expr'
       Ok (_ `RecHasTy` exprTy) -> Err $ RootCause msg
-        where msg = "The expression `" ++ show expr ++ "` has type `" ++ show exprTy ++ "`, not `" ++ show ty ++ "`"
+        where msg = "The expression\n```\n" ++ show expr ++ "\n```\nhas type `" ++ show exprTy ++ "`, not `" ++ show ty ++ "`"
       err -> err `addError` msg
         where msg = "The expression\n```\n" ++ show expr ++ "\n```\ndoesn't typecheck"
 

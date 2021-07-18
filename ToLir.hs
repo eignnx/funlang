@@ -62,6 +62,7 @@ translateInstr labels instr = case instr of
   Hir.Intrinsic  intr -> Lir.Intrinsic intr
   Hir.Call       argC -> Lir.Call argC
   Hir.Ret             -> Lir.Ret
+  Hir.Nop             -> Lir.Nop
 
 translateValue :: LblMap
                -> Hir.Value

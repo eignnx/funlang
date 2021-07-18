@@ -1,4 +1,4 @@
-def loop-forever[] do
+def loop-forever[] -> Never do
   "pls pop me!";
   loop do
     intr.here[];

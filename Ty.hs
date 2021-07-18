@@ -9,6 +9,7 @@ module Ty
       , TextTy
       )
   , (<:)
+  , (-&&>)
   )
 where
 
@@ -38,3 +39,12 @@ pattern VoidTy  = ValTy "Void"
 pattern BoolTy  = ValTy "Bool"
 pattern IntTy   = ValTy "Int"
 pattern TextTy  = ValTy "Text"
+
+-- | Short-circuits a type if the first type is `Never`.
+--   For instance, in the block expression `do intr.exit[]; 1 end`, the entire
+--   block ought to have type `Never -&&> Int` since `intr.exit[]` has type
+--   `Never`, and it appears BEFORE the expression `1`. Therefore, the entire
+--   block should have type `Never`.
+(-&&>) :: Ty -> Ty -> Ty
+NeverTy -&&> _ = NeverTy
+_ -&&> ty = ty
