@@ -143,6 +143,9 @@ data Seq e         -- <sequence> -->
 instance (IsEndTerminated e, Show e) => Show (Seq e)  where
   show Empty = ""
   show (Result e) = show e
+  show (Semi e Empty)
+    | isEndTerminated e = show e
+    | otherwise = show e ++ ";"
   show (Semi e seq)
     | isEndTerminated e = show e ++ "\n" ++ show seq
     | otherwise = show e ++ ";\n" ++ show seq
