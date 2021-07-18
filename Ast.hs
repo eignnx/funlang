@@ -99,7 +99,7 @@ data RelOp
   | Lt
   | Eq
   | Neq
-  deriving (Show)
+  deriving (Show, Eq)
 
 data OtherOp
   = Concat

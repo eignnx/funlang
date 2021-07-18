@@ -21,6 +21,15 @@ def never-eq[] -> Never do
   end
 end
 
+# Operator `!=` is kinda a special case.
+def never-neq[] -> Never do
+  if "blah" != intr.exit[] then
+    1
+  else
+    2
+  end
+end
+
 def foo[x: Int, y: Int, z: Int] do
 end
 

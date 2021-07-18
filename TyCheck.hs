@@ -316,6 +316,8 @@ instance CheckType Ast.Expr where
   infer (Ast.Binary op@(Ast.BoolOp _) e1 e2)           = inferBinOp op BoolTy BoolTy e1 e2
   infer (Ast.Binary op@(Ast.RelOp Ast.Eq) e1 e2)       = return $ Err $ RootCause msg
     where msg = "I don't know how to infer the type of the `==` operator just yet. It's trickier than you'd think"
+  infer (Ast.Binary op@(Ast.RelOp Ast.Neq) e1 e2)       = return $ Err $ RootCause msg
+    where msg = "I don't know how to infer the type of the `!=` operator just yet. It's trickier than you'd think"
   infer (Ast.Binary op@(Ast.RelOp _) e1 e2)            = inferBinOp op IntTy BoolTy e1 e2
   infer (Ast.Binary op@(Ast.OtherOp Ast.Concat) e1 e2) = inferBinOp op TextTy TextTy e1 e2
 
@@ -439,6 +441,7 @@ instance CheckType Ast.Expr where
         return $ Ok $ ifExpr `RecHasTy` (condTy -&&> (yesTy >||< noTy))
       (_, Err err) -> return $ condRes *> (Err err `addError` msg)
         where msg = "The two branches of this `if` expression have different types"
+      _ -> return $ condRes <* bodyRes
 
   -- A while expression does NOT return the never type. This is because
   -- usually, it does not infinitely loop. It usually loops until the
@@ -478,18 +481,19 @@ instance CheckType Ast.Expr where
 
   check :: Ast.Expr -> Ty -> TyChecker (Res Ast.TypedExpr)
 
-  -- Check an equality expression: `e1 == e2`
-  check (Ast.Binary (Ast.RelOp Ast.Eq) e1 e2) ty | ty <: BoolTy = do
-    res <- checkSameType e1 e2
-    case res of
-      Ok (e1', e2') -> do
-        let _ `RecHasTy` ty1 = e1'
-        let _ `RecHasTy` ty2 = e2'
-        let resTy = ty1 -&&> ty2 -&&> BoolTy
-        let expr = Ast.BinaryF (Ast.RelOp Ast.Eq) e1' e2'
-        return $ res *> Ok (expr `RecHasTy` resTy)
-      Err err -> return $ Err err `addError` msg
-        where msg = "The arguments to the `==` operator must have the same type, but they don't"
+  -- Check an equality/disequality expression: `e1 == e2` or `e1 != e2`
+  check (Ast.Binary (Ast.RelOp op) e1 e2) ty
+    | ty <: BoolTy && op `elem` [Ast.Eq, Ast.Neq] = do
+      res <- checkSameType e1 e2
+      case res of
+        Ok (e1', e2') -> do
+          let _ `RecHasTy` ty1 = e1'
+          let _ `RecHasTy` ty2 = e2'
+          let resTy = ty1 -&&> ty2 -&&> BoolTy
+          let expr = Ast.BinaryF (Ast.RelOp op) e1' e2'
+          return $ res *> Ok (expr `RecHasTy` resTy)
+        Err err -> return $ Err err `addError` msg
+          where msg = "The arguments to the `==`/`!=` operator must have the same type, but they don't"
 
   -- An `if` expression has two sequentially-executed sub-expressions:
   --  1. The conditional expression, and
