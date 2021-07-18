@@ -10,6 +10,7 @@ module Ty
       )
   , (<:)
   , (-&&>)
+  , (>||<)
   )
 where
 
@@ -48,3 +49,13 @@ pattern TextTy  = ValTy "Text"
 (-&&>) :: Ty -> Ty -> Ty
 NeverTy -&&> _ = NeverTy
 _ -&&> ty = ty
+
+-- | This operator is used to join the types of two branches. It is always the
+--   case that `Never >||< ty` or `ty >||< Never` is `ty`. In general, this
+--   operator returns the supertype of its two arguments.
+--   NOTE: It only works if the two types are related via `<:`.
+---  HMMM: Should `Int >||< Text` be `Any`? Probably not.
+(>||<) :: Ty -> Ty -> Ty
+sub >||< super | sub <: super = super
+super >||< sub | sub <: super = super
+_ >||< _ = error "Operator `>||<` can only accept types that are related!"

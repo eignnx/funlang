@@ -15,7 +15,7 @@ where
 
 import qualified Ast
 import           Ast           ( Typed(HasTy), RecTyped(RecHasTy) )
-import           Ty            ( Ty(..), (<:), (-&&>) )
+import           Ty            ( Ty(..), (<:), (-&&>), (>||<) )
 import qualified Intr
 import qualified Data.Map      as M
 import           Control.Monad ( foldM )
@@ -211,36 +211,6 @@ instance CheckType Ast.Item where
       (_, Err err) -> return $ (Err err) `addError` msg
         where msg = "The function `" ++ name ++ "` does not match expected type `" ++ show expected ++ "`"
 
--- Helper function for inferring+checking unary operators.
--- Pass in the expected type of the arguments, the expected return type, and it will do
--- the checking and inference for you.
-inferUnaryOp :: Ast.UnaryOp
-             -> Ty
-             -> Ty
-             -> Ast.Expr
-             -> TyChecker (Res Ast.TypedExpr)
-inferUnaryOp op argTy retTy expr = do
-  exprRes <- check expr argTy
-  case exprRes of
-    Ok expr' -> return $ Ok (Ast.UnaryF op expr' `RecHasTy` retTy)
-    Err err -> return $ Err err
-
--- Helper function for inferring+checking binary operators.
--- Pass in the expected type of the arguments, the expected return type, and it will do
--- the checking and inference for you.
-inferBinOp :: Ast.BinOp
-           -> Ty
-           -> Ty
-           -> Ast.Expr
-           -> Ast.Expr
-           -> TyChecker (Res Ast.TypedExpr)
-inferBinOp op argTy retTy e1 e2 = do
-    e1Ty <- check e1 argTy
-    e2Ty <- check e2 argTy
-    case (e1Ty, e2Ty) of
-      (Ok e1', Ok e2') -> return $ Ok (Ast.BinaryF op e1' e2' `RecHasTy` retTy)
-      (a, b) -> return (a *> b)
-
 instance CheckType (Intr.Intrinsic, [Ast.TypedExpr]) where
 
   type Checked (Intr.Intrinsic, [Ast.TypedExpr]) =
@@ -284,6 +254,40 @@ instance CheckType (Ast.Seq Ast.Expr) where
       _ -> return (eRes *> seqRes)
 
   check = undefined
+
+-- Helper function for inferring+checking unary operators.
+-- Pass in the expected type of the arguments, the expected return type, and it will do
+-- the checking and inference for you.
+inferUnaryOp :: Ast.UnaryOp
+             -> Ty -- Expected argument type
+             -> Ty -- Result type
+             -> Ast.Expr
+             -> TyChecker (Res Ast.TypedExpr)
+inferUnaryOp op argTy retTy expr = do
+  exprRes <- check expr argTy
+  case exprRes of
+    Ok expr'@(_ `RecHasTy` exprTy) -> do
+      let ty = exprTy -&&> retTy
+      return $ Ok (Ast.UnaryF op expr' `RecHasTy` ty)
+    Err err -> return $ Err err
+
+-- Helper function for inferring+checking binary operators.
+-- Pass in the expected type of the arguments, the expected return type, and it will do
+-- the checking and inference for you.
+inferBinOp :: Ast.BinOp
+           -> Ty -- Expected argument type
+           -> Ty -- Result type
+           -> Ast.Expr
+           -> Ast.Expr
+           -> TyChecker (Res Ast.TypedExpr)
+inferBinOp op argTy retTy e1 e2 = do
+    e1Ty <- check e1 argTy
+    e2Ty <- check e2 argTy
+    case (e1Ty, e2Ty) of
+      (Ok e1'@(_  `RecHasTy` ty1), Ok e2'@(_ `RecHasTy` ty2)) -> do
+        let ty = ty1 -&&> ty2 -&&> retTy
+        return $ Ok (Ast.BinaryF op e1' e2' `RecHasTy` ty)
+      (a, b) -> return (a *> b)
 
 instance CheckType Ast.Expr where
 
@@ -423,14 +427,18 @@ instance CheckType Ast.Expr where
   --   2. CHECK that the whole if expr has that type.
   -- NOTE #1: We only need to be able to INFER one (1) of the branches.
   -- NOTE #2: The traslation to Ast.TypedExpr will be done by `check`.
-  infer ifExpr@(Ast.If cond yes no) = do
-    yesRes <- infer yes
-    noRes <- infer no
-    case (yesRes, noRes) of
-        (Ok (_ `RecHasTy` yesTy), _) -> check ifExpr yesTy -- Ensure yes-branch and entire expr have same type.
-        (_, Ok (_ `RecHasTy` noTy)) -> check ifExpr noTy -- Ensure no-branch and entire expr have same type.
-        (Err e1, Err e2) -> return $ Err (e1 <> e2) `addError` msg
-          where msg = "I couldn't infer the type of the `if` expression `" ++ show ifExpr ++ "`"
+  infer (Ast.If cond yes no) = do
+    condRes <- check cond BoolTy
+    bodyRes <- checkSameType yes no
+    case (condRes, bodyRes) of
+      (Ok cond', Ok (yes', no')) -> do
+        let _ `RecHasTy` condTy = cond'
+        let _ `RecHasTy` yesTy = yes'
+        let _ `RecHasTy` noTy = no'
+        let ifExpr = Ast.IfF cond' yes' no'
+        return $ Ok $ ifExpr `RecHasTy` (condTy -&&> (yesTy >||< noTy))
+      (_, Err err) -> return $ condRes *> (Err err `addError` msg)
+        where msg = "The two branches of this `if` expression have different types"
 
   -- A while expression does NOT return the never type. This is because
   -- usually, it does not infinitely loop. It usually loops until the
@@ -475,8 +483,11 @@ instance CheckType Ast.Expr where
     res <- checkSameType e1 e2
     case res of
       Ok (e1', e2') -> do
+        let _ `RecHasTy` ty1 = e1'
+        let _ `RecHasTy` ty2 = e2'
+        let resTy = ty1 -&&> ty2 -&&> BoolTy
         let expr = Ast.BinaryF (Ast.RelOp Ast.Eq) e1' e2'
-        return $ res *> Ok (expr `RecHasTy` BoolTy)
+        return $ res *> Ok (expr `RecHasTy` resTy)
       Err err -> return $ Err err `addError` msg
         where msg = "The arguments to the `==` operator must have the same type, but they don't"
 
@@ -541,24 +552,36 @@ instance CheckType Ast.Expr where
   check expr ty = do
     exprRes <- infer expr
     return $ case exprRes of
-      Ok expr'@(_ `RecHasTy` exprTy) | exprTy <: ty -> Ok expr'
-      Ok (_ `RecHasTy` exprTy) -> Err $ RootCause msg
-        where msg = "The expression\n```\n" ++ show expr ++ "\n```\nhas type `" ++ show exprTy ++ "`, not `" ++ show ty ++ "`"
+      Ok expr'@(_ `RecHasTy` exprTy)
+        | exprTy <: ty -> Ok expr'
+        | otherwise    -> Err $ RootCause msg
+          where msg = "The expression\n```\n" ++ show expr ++ "\n```\nhas type `" ++ show exprTy ++ "`, not `" ++ show ty ++ "`"
       err -> err `addError` msg
         where msg = "The expression\n```\n" ++ show expr ++ "\n```\ndoesn't typecheck"
 
 checkSameType :: Ast.Expr -> Ast.Expr
               -> TyChecker (Res (Ast.TypedExpr, Ast.TypedExpr))
 checkSameType e1 e2 = do
-  e1Res <- infer e1 -- What happens if we CAN'T infer e1, but CAN infer e2?
+  e1Res <- infer e1
   case e1Res of
     Ok e1'@(_ `RecHasTy` ty1) -> do
       e2Res <- check e2 ty1 -- Both args must be of same type.
       case e2Res of
         Ok e2' -> do
           return $ Ok (e1', e2')
-        Err err -> return $ Err err
-    Err err -> return $ Err err
+        Err err -> return $ Err err `addError` msg
+          where msg = "Both `" ++ show e1 ++ "` and `" ++ show e2 ++ "` must have the same type, but they don't"
+    Err err -> do -- If we CAN'T infer e1, let's see if we can infer e2.
+      e2Res <- infer e2
+      case e2Res of
+        Ok e2'@(_ `RecHasTy` ty2) -> do
+          e1CheckRes <- check e1 ty2
+          case e1CheckRes of
+            Ok e1' -> do
+              return $ Ok (e1', e2')
+            Err err -> return $ Err err
+        Err err -> return $ Err err `addError` msg
+          where msg = "I can't infer the type of `" ++ show e1 ++ "` or of `" ++ show e2 ++ "`"
 
 astToTypedAst :: CheckType a => a -> Res (Checked a)
 astToTypedAst ast = evalState (infer ast) initState

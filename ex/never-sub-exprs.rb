@@ -14,7 +14,11 @@ end
 
 # Operator `==` is kinda a special case.
 def never-eq[] -> Never do
-  1 == intr.exit[];
+  if "blah" == intr.exit[] then
+    1
+  else
+    2
+  end
 end
 
 def foo[x: Int, y: Int, z: Int] do
