@@ -202,7 +202,6 @@ literalExpr = Ast.Literal <$> literal
 termFirst :: Parser Ast.Expr
 termFirst =  semiEndedTerm <|> endEndedTerm
 
-
 semiEndedTerm =  intrinsicExpr
              <|> parens expression
              <|> nopExpr
@@ -217,7 +216,6 @@ endEndedTerm =  blockExpr
             <|> whileExpr
             <|> loopExpr
 
-semiEndedExpr = try nestedCalls <|> semiEndedTerm 
 endEndedExpr = endEndedTerm
 
 -- Expressions
@@ -225,7 +223,7 @@ expression :: Parser Ast.Expr
 expression = buildExpressionParser operators term
 
 terminatedExpr :: Parser Ast.Expr
-terminatedExpr = (semiEndedExpr <* semi) <|> endEndedExpr
+terminatedExpr = try (expression <* semi) <|> endEndedExpr
 
 intrinsicExpr :: Parser Ast.Expr
 intrinsicExpr = do
