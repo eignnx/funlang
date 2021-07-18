@@ -227,10 +227,10 @@ pattern Ann :: Expr -> Ty.Ty -> Expr
 pattern Ann expr ty = Fix (AnnF expr ty)
 
 data Typed a = a `HasTy` Ty.Ty
-data RecTyped f =  (f (RecTyped f)) `RecHasTy` Ty.Ty
+data RecTyped f = (f (RecTyped f)) :<: Ty.Ty
 
 unRecTyped :: RecTyped f -> f (RecTyped f)
-unRecTyped (f `RecHasTy` _) = f
+unRecTyped (f :<: _) = f
 
 type TypedExpr = RecTyped ExprF
 
@@ -277,7 +277,7 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (AnnF e t) = show e ++ ": " ++ show t
 
 instance Show TypedExpr where
-  show (e `RecHasTy` t) = "(" ++ show e ++ " : " ++ show t ++ ")"
+  show (e :<: t) = "(" ++ show e ++ " : " ++ show t ++ ")"
 
 instance Show Expr where
   show (Fix e) = show e

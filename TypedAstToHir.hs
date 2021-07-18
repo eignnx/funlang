@@ -80,7 +80,7 @@ instance Compile Ast.OtherOp where
 --   `Hir.Pop` afterwards to discard the value.
 compileTerminatedExprs :: [Ast.TypedExpr] -> CompState [Hir.Instr]
 compileTerminatedExprs exprs = do
-  hir <- forM exprs $ \expr@(_ `RecHasTy` exprTy) -> do
+  hir <- forM exprs $ \expr@(_ :<: exprTy) -> do
     expr' <- compile expr
     let maybePop = if exprTy <: Ty.VoidTy then [] else [Hir.Pop]
     return $ expr' ++ maybePop
@@ -92,7 +92,7 @@ instance Compile (Ast.Seq Ast.TypedExpr) where
 
   compile (Ast.Result expr) = compile expr
 
-  compile (Ast.Semi expr@(_ `RecHasTy` ty) seq)
+  compile (Ast.Semi expr@(_ :<: ty) seq)
     | ty <: Ty.VoidTy = do -- Already Void type, no need to Pop.
       expr' <- compile expr
       seq' <- compile seq
@@ -104,31 +104,31 @@ instance Compile (Ast.Seq Ast.TypedExpr) where
 
 instance Compile Ast.TypedExpr where
 
-  compile ((Ast.BlockF seq) `RecHasTy` ty) = compile seq
+  compile (Ast.BlockF seq :<: ty) = compile seq
 
-  compile ((Ast.VarF name) `RecHasTy` ty) =
+  compile (Ast.VarF name :<: ty) =
     if ty <: Ty.VoidTy then
       return []
     else
       return [Hir.Load name]
 
-  compile ((Ast.LiteralF lit  ) `RecHasTy` ty) = return [Hir.Const (valueFromLit lit)]
-  compile ((Ast.UnaryF op expr) `RecHasTy` ty) = do
+  compile (Ast.LiteralF lit   :<: ty) = return [Hir.Const (valueFromLit lit)]
+  compile (Ast.UnaryF op expr :<: ty) = do
     expr' <- compile expr
     op'   <- compile op
     return $ expr' ++ op'
-  compile ((Ast.BinaryF op x y) `RecHasTy` ty) = do
+  compile (Ast.BinaryF op x y :<: ty) = do
     y'  <- compile y
     x'  <- compile x
     op' <- compile op
     -- NOTE: you gotta reverse these args below!
     return $ y' ++ x' ++ op'
 
-  compile ((Ast.RetF expr) `RecHasTy` ty) = do
+  compile (Ast.RetF expr :<: ty) = do
     expr' <- compile expr
     return expr'
 
-  compile ((Ast.CallF fn args) `RecHasTy` ty) = do
+  compile (Ast.CallF fn args :<: ty) = do
     args' <- compile args -- Using `instance Compile a => Compile [a]`
     fn' <- compile fn
     let argC = length args
@@ -138,31 +138,31 @@ instance Compile Ast.TypedExpr where
 
   -- FIXME: HACK!
   -- Intercept the call to deal with `Void` specially. https://pbs.twimg.com/media/EU0GDTVU4AY73KC?format=jpg&name=small
-  compile intr@((Ast.IntrinsicF pos "print" [arg@(_ `RecHasTy` Ty.VoidTy)]) `RecHasTy` ty) = do
+  compile intr@(Ast.IntrinsicF pos "print" [arg@(_ :<: Ty.VoidTy)] :<: ty) = do
     let intr = Intr.fromName "print" pos
     return $  [ Hir.Const $ Hir.VString "<Void>"
               , Hir.Intrinsic intr
               ]
 
-  compile ((Ast.IntrinsicF pos name args) `RecHasTy` ty) = do
+  compile (Ast.IntrinsicF pos name args :<: ty) = do
     args' <- mapM compile args
     let intr = Intr.fromName name pos
     return $ join args' ++ [Hir.Intrinsic intr]
 
-  compile (Ast.NopF `RecHasTy` ty)            = return [Hir.Nop]
-  compile ((Ast.AnnF expr _) `RecHasTy` ty)   = compile expr
+  compile (Ast.NopF :<: ty)            = return [Hir.Nop]
+  compile (Ast.AnnF expr _ :<: ty)   = compile expr
 
-  compile ((Ast.LetF var expr@(_ `RecHasTy` exprTy)) `RecHasTy` ty) = do
+  compile (Ast.LetF var expr@(_ :<: exprTy) :<: ty) = do
     expr' <- compile expr
     let maybeStore = if exprTy <: Ty.VoidTy then [] else [Hir.Store var]
     return $ expr' ++ maybeStore
 
-  compile ((Ast.AssignF var expr@(_ `RecHasTy` exprTy)) `RecHasTy` ty) = do
+  compile (Ast.AssignF var expr@(_ :<: exprTy) :<: ty) = do
     expr' <- compile expr
     let maybeStore = if exprTy <: Ty.VoidTy then [] else [Hir.Store var]
     return $ expr' ++ maybeStore
 
-  compile ((Ast.IfF cond yes no) `RecHasTy` ty) = do
+  compile (Ast.IfF cond yes no :<: ty) = do
     cond'  <- compile cond
     yes'   <- compile yes
     noLbl  <- fresh
@@ -176,7 +176,7 @@ instance Compile Ast.TypedExpr where
       ++ [Hir.Label noLbl]
       ++ no'
       ++ [Hir.Label endLbl]
-  compile ((Ast.WhileF cond body) `RecHasTy` ty) = do
+  compile (Ast.WhileF cond body :<: ty) = do
     cond' <- compile cond
     top   <- fresh
     body' <- compile body
@@ -188,7 +188,7 @@ instance Compile Ast.TypedExpr where
       ++ body'
       ++ [Hir.Jmp top]
       ++ [Hir.Label end]
-  compile ((Ast.LoopF body) `RecHasTy` ty) = do
+  compile (Ast.LoopF body :<: ty) = do
     top   <- fresh
     body' <- compile body
     return
