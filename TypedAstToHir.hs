@@ -49,22 +49,6 @@ instance Compile a => Compile [a] where
     xs' <- compile xs
     return (x' ++ xs')
   
-instance Compile Ast.TypedAst where
-  compile (items `HasTy` ty) = compile items
-
-instance Compile Ast.TypedItem where
-  compile ((Ast.Def name paramsAndTypes (body, retTy)) `HasTy` ty) = do
-    let params = map fst paramsAndTypes
-    lbl <- fresh
-    define name lbl
-    let paramBindings = map Hir.Store $ reverse params
-    let prologue = paramBindings -- First thing we do is store args (from stack) in memory.
-    body' <- compile body
-    let epilogue = [Hir.Ret] -- At the end of every function MUST be a return instr.
-    return $  [Hir.Label lbl] -- Label the function.
-           ++ prologue -- First run the prologue.
-           ++ body' -- Then run the body of the function.
-           ++ epilogue -- Finally, run the epilogue.
 
 instance Compile Ast.ArithOp where
   compile op = return $ case op of
@@ -113,10 +97,12 @@ instance Compile Ast.TypedExpr where
       return [Hir.Load name]
 
   compile (Ast.LiteralF lit   :<: ty) = return [Hir.Const (valueFromLit lit)]
+
   compile (Ast.UnaryF op expr :<: ty) = do
     expr' <- compile expr
     op'   <- compile op
     return $ expr' ++ op'
+
   compile (Ast.BinaryF op x y :<: ty) = do
     y'  <- compile y
     x'  <- compile x
@@ -150,6 +136,7 @@ instance Compile Ast.TypedExpr where
     return $ join args' ++ [Hir.Intrinsic intr]
 
   compile (Ast.NopF :<: ty)            = return [Hir.Nop]
+
   compile (Ast.AnnF expr _ :<: ty)   = compile expr
 
   compile (Ast.LetF var expr@(_ :<: exprTy) :<: ty) = do
@@ -176,6 +163,7 @@ instance Compile Ast.TypedExpr where
       ++ [Hir.Label noLbl]
       ++ no'
       ++ [Hir.Label endLbl]
+
   compile (Ast.WhileF cond body :<: ty) = do
     cond' <- compile cond
     top   <- fresh
@@ -188,6 +176,7 @@ instance Compile Ast.TypedExpr where
       ++ body'
       ++ [Hir.Jmp top]
       ++ [Hir.Label end]
+
   compile (Ast.LoopF body :<: ty) = do
     top   <- fresh
     body' <- compile body
@@ -195,6 +184,21 @@ instance Compile Ast.TypedExpr where
       $  [Hir.Label top]
       ++ body'
       ++ [Hir.Jmp top]
+
+  compile (Ast.ModF name items :<: ty) = compile items
+
+  compile (Ast.DefF name paramsAndTypes retTy body :<: ty) = do
+    let params = map fst paramsAndTypes
+    lbl <- fresh
+    define name lbl
+    let paramBindings = map Hir.Store $ reverse params
+    let prologue = paramBindings -- First thing we do is store args (from stack) in memory.
+    body' <- compile body
+    let epilogue = [Hir.Ret] -- At the end of every function MUST be a return instr.
+    return $  [Hir.Label lbl] -- Label the function.
+           ++ prologue -- First run the prologue.
+           ++ body' -- Then run the body of the function.
+           ++ epilogue -- Finally, run the epilogue.
 
 instance Compile Ast.UnaryOp where
   compile Ast.Not = return [Hir.Not]

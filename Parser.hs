@@ -17,6 +17,8 @@ import           Text.Parsec.Expr
 import           Text.Parsec.Language
 import qualified Text.Parsec.Token    as Token
 import           Debug.Trace          ( trace )
+import qualified Data.Char            as Char
+import           System.FilePath      ( takeBaseName )
 
 languageDef = emptyDef
   { Token.commentStart    = "{#"
@@ -25,7 +27,8 @@ languageDef = emptyDef
   , Token.nestedComments  = True
   , Token.identStart      = letter
   , Token.identLetter     = alphaNum <|> oneOf "-"
-  , Token.reservedNames   = [ "def"
+  , Token.reservedNames   = [ "mod"
+                            , "def"
                             , "let"
                             , "if"
                             , "then"
@@ -81,11 +84,23 @@ colon = Token.colon lexer
 
 -- Statements
 -- The main statement parser
-langParser :: Parser Ast.Ast
-langParser = whiteSpace >> many1 item
+langParser :: Parser Ast.Expr
+langParser = innerMod
 
-item :: Parser Ast.Item
-item = def
+-- Parses a file into a module. Definitions can be placed directly without
+-- declaring the module with the `mod` keyword.
+innerMod :: Parser Ast.Expr
+innerMod = do
+  items <- whiteSpace >> many expression
+  return $ Ast.Mod "#file" items
+
+modExpr :: Parser Ast.Expr
+modExpr = do
+  reserved "mod"
+  name <- identifier
+  items <- whiteSpace >> many expression
+  reserved "end"
+  return $ Ast.Mod name items
 
 -- ```
 -- def my-fn[arg1, arg2, ...] do
@@ -96,18 +111,18 @@ item = def
 -- ```
 -- def my-fn[arg1, arg2, ...] = ...expr...
 -- ```
-def :: Parser Ast.Item
-def = do
+defExpr :: Parser Ast.Expr
+defExpr = do
   reserved "def"
   name       <- identifier
   let param  =  (,) <$> identifier <*> (colon *> ty)
   params     <- brackets $ sepEndBy param (symbol ",")
   let exprTail = (do reservedOp "="
                      body <- expression
-                     return $ Ast.Def name params (body, Nothing))
+                     return $ Ast.Def name params Nothing body)
   let blockTail = (do retTy <- option Ty.VoidTy (reservedOp "->" *> ty) -- Without a ret ty, def defaults to returning Unit.
                       body  <- blockExpr
-                      return $ Ast.Def name params (body, Just retTy))
+                      return $ Ast.Def name params (Just retTy) body)
   exprTail <|> blockTail
 
 ty :: Parser Ty.Ty
@@ -215,6 +230,8 @@ endEndedTerm =  blockExpr
             <|> ifExpr
             <|> whileExpr
             <|> loopExpr
+            <|> defExpr
+            <|> modExpr
 
 endEndedExpr = endEndedTerm
 
@@ -266,17 +283,23 @@ blockExpr = do
   return $ Ast.Block seq
 
 -- REPL Helper Functions
-parseString :: String -> Ast.Ast
+parseString :: String -> Ast.Expr
 parseString = parseSrc "<string input>"
 
-parseSrc :: String -> String -> Ast.Ast
+parseSrc :: String -> String -> Ast.Expr
 parseSrc file src = case parse langParser file src of
   Left  e -> error $ show e
   Right r -> r
 
-parseFile :: String -> IO Ast.Ast
-parseFile file = do
-  program <- readFile file
-  case parse langParser file program of
+parseFile :: String -> IO Ast.Expr
+parseFile fileName = do
+  src <- readFile fileName
+  case parse langParser fileName src of
     Left  e -> print e >> fail "parse error"
-    Right r -> return r
+    Right (Ast.Mod _ items) -> do
+      let modName = modNameFromFileName fileName
+      return $ Ast.Mod modName items
+
+modNameFromFileName :: String -> String
+modNameFromFileName fileName = capitalize $ takeBaseName fileName
+  where capitalize (c:cs) = Char.toUpper c : cs

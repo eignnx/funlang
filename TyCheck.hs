@@ -3,6 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module TyCheck
   ( Res(..)
@@ -112,104 +113,7 @@ class CheckType a where
   infer :: a -> TyChecker (Res (Checked a))
   check :: a -> Ty -> TyChecker (Res (Checked a))
 
-instance CheckType Ast.Ast where
-  type Checked Ast.Ast = Ast.TypedAst
 
-  infer :: Ast.Ast -> TyChecker (Res Ast.TypedAst)
-  infer items = do
-    skimItemDefs -- First, we need to put all top-level definitions into the Ctx.
-    itemsRes <- mapM infer items
-    case sequenceA itemsRes of
-      Ok items' -> do
-        let mkPair (item `HasTy` ty) = (Ast.itemName item, ty)
-        let modTy = ModTy $ M.fromList $ map mkPair items'
-        return $ Ok (items' `HasTy` modTy)
-      Err err -> return $ Err err
-    where
-      skimItemDefs =
-        forM_ items $ \case
-          Ast.Def name params (_, Just retTy) -> 
-            define name $ FnTy (map snd params) retTy
-          Ast.Def name params (_, Nothing) ->
-            -- Since we don't know the return type, we have to stub for now.
-            define name $ FnTy (map snd params) NeverTy
-
-  check [] (ModTy m) | m == M.empty = return $ Ok ([] `HasTy` ModTy m)
-  check ast m = do
-    astRes <- infer ast
-    case astRes of
-      Ok (ast' `HasTy` astTy) | astTy <: m -> return $ Ok (ast' `HasTy` m)
-      Ok (_ `HasTy` notM) -> return $ Err $ RootCause msg
-        where msg = "Module has type `" ++ show notM ++ "`, not `" ++ show m
-      err -> return err
-
-instance CheckType Ast.Item where
-  type Checked Ast.Item = Ast.TypedItem
-
-  infer :: Ast.Item -> TyChecker (Res Ast.TypedItem)
-
-  -- For when the return type IS specified.
-  infer (Ast.Def name params (body, Just retTy)) = do
-    setFnRetTy retTy -- Set fn's return type.
-    st <- get -- Save current ctx
-    paramTys <- forM params $ \(param, paramTy) -> do
-      define param paramTy
-    bodyRes <- check body retTy
-    put st -- Restore old ctx
-    case bodyRes of
-      Ok typedBody@(_ :<: bodyTy) -> do
-        let def = Ast.Def name params (typedBody, Just retTy)
-        return $ Ok (def `HasTy` (FnTy paramTys bodyTy))
-      Err err -> return $ Err err
-
-  -- For when the return type is NOT specified.
-  infer (Ast.Def name params (body, Nothing)) = do
-    setFnRetTy NeverTy -- We don't know the fn's return type yet! FIXME: seems bad...
-    st <- get -- Save current ctx
-    paramTys <- forM params $ \(param, paramTy) -> do
-      define param paramTy
-    bodyRes <- infer body
-    put st -- Restore old ctx
-    case bodyRes of
-      Ok typedBody@(_ :<: bodyTy) -> do
-        let def = Ast.Def name params (typedBody, Just bodyTy)
-        let ty = FnTy paramTys bodyTy
-        define name ty -- We MUST save the full type now.
-        return $ Ok (def `HasTy` ty)
-      Err err -> return $ Err err
-
-  check :: Ast.Item -> Ty -> TyChecker (Res Ast.TypedItem)
-
-  -- For when the return type IS specified.
-  check (Ast.Def name params (body, Just retTy)) expected@(FnTy expectedParamTys expectedRetTy) = do
-    st <- get -- Save current ctx
-    paramTys <- forM params $ \(param, paramTy) -> do
-      define param paramTy
-    bodyRes <- check body expectedRetTy
-    put st -- Restore old ctx
-    case (paramTys == expectedParamTys, bodyRes) of
-      (True, Ok body'@(_ :<: bodyTy)) | retTy == bodyTy -> do
-        let def = Ast.Def name params (body', Just retTy)
-        return $ Ok (def `HasTy` expected)
-      (_, Ok (_ :<: bodyTy)) | retTy /= bodyTy -> return $ Err $ RootCause msg
-        where msg = "The function `" ++ name ++ "` has type `" ++ show actualTy ++ "`, not `" ++ show expected ++ "`"
-              actualTy = FnTy paramTys bodyTy
-      (_, Err err) -> return $ (Err err) `addError` msg
-        where msg = "The function `" ++ name ++ "` does not match expected type `" ++ show expected ++ "`"
-
-  -- For when the return type is NOT specified.
-  check (Ast.Def name params (body, Nothing)) expected@(FnTy expectedParamTys expectedRetTy) = do
-    st <- get -- Save current ctx
-    paramTys <- forM params $ \(param, paramTy) -> do
-      define param paramTy
-    bodyRes <- check body expectedRetTy
-    put st -- Restore old ctx
-    case (paramTys == expectedParamTys, bodyRes) of
-      (True, Ok body'@(_ :<: bodyTy)) -> do
-        let def = Ast.Def name params (body', Nothing)
-        return $ Ok (def `HasTy` expected)
-      (_, Err err) -> return $ (Err err) `addError` msg
-        where msg = "The function `" ++ name ++ "` does not match expected type `" ++ show expected ++ "`"
 
 instance CheckType (Intr.Intrinsic, [Ast.TypedExpr]) where
 
@@ -288,6 +192,14 @@ inferBinOp op argTy retTy e1 e2 = do
         let ty = ty1 -&&> ty2 -&&> retTy
         return $ Ok (Ast.BinaryF op e1' e2' :<: ty)
       (a, b) -> return (a *> b)
+
+itemName :: Show (Ast.ExprF r) => Ast.ExprF r -> Res String
+itemName = \case
+  Ast.DefF name _ _ _ -> Ok name
+  Ast.ModF name _ -> Ok name
+  Ast.LetF name _ -> Ok name
+  other -> Err $ RootCause msg
+    where msg = "The expression `" ++ show other ++ "` can't appear in the top level."
 
 instance CheckType Ast.Expr where
 
@@ -475,6 +387,59 @@ instance CheckType Ast.Expr where
     return $ (rebuild <$> res) `addError` msg
       where msg = "The expression `" ++ show expr ++ "` does not have type `" ++ show ty ++ "`"
 
+  -- For when the return type IS specified.
+  infer (Ast.Def name params (Just retTy) body) = do
+    setFnRetTy retTy -- Set fn's return type.
+    st <- get -- Save current ctx
+    paramTys <- forM params $ \(param, paramTy) -> do
+      define param paramTy
+    bodyRes <- check body retTy
+    put st -- Restore old ctx
+    case bodyRes of
+      Ok typedBody@(_ :<: bodyTy) -> do
+        let def = Ast.DefF name params (Just retTy) typedBody
+        return $ Ok (def :<: (FnTy paramTys bodyTy))
+      Err err -> return $ Err err
+
+  -- For when the return type is NOT specified.
+  infer (Ast.Def name params Nothing body) = do
+    setFnRetTy NeverTy -- We don't know the fn's return type yet! FIXME: seems bad...
+    st <- get -- Save current ctx
+    paramTys <- forM params $ \(param, paramTy) -> do
+      define param paramTy
+    bodyRes <- infer body
+    put st -- Restore old ctx
+    case bodyRes of
+      Ok typedBody@(_ :<: bodyTy) -> do
+        let def = Ast.DefF name params (Just bodyTy) typedBody
+        let ty = FnTy paramTys bodyTy
+        define name ty -- We MUST save the full type now.
+        return $ Ok (def :<: ty)
+      Err err -> return $ Err err
+
+  infer (Ast.Mod name items) = do
+    skimItemDefs -- First, we need to put all top-level definitions into the Ctx.
+    itemsRes <- mapM infer items
+    case sequenceA itemsRes of
+      Ok items' -> do
+        let mkPair (item :<: ty) = (Ast.itemName item, ty)
+        let modTy = ModTy $ M.fromList $ map mkPair items'
+        let mod = Ast.ModF name items'
+        define name modTy
+        return $ Ok (mod :<: modTy)
+      Err err -> return $ Err err
+    where
+      skimItemDefs =
+        forM_ items $ \case
+          Ast.Def name params (Just retTy) _ -> 
+            define name $ FnTy (map snd params) retTy
+          Ast.Def name params Nothing _ ->
+            -- Since we don't know the return type, we have to stub for now.
+            define name $ FnTy (map snd params) NeverTy
+          Ast.Mod name _ ->
+            define name $ ModTy M.empty
+          other -> error ("Can't skim one of these: " ++ show other)
+
   -- Default case.
   infer expr = return $ Err $ RootCause $ msg
     where msg = "I don't have enough information to infer the type of `" ++ show expr ++ "`"
@@ -551,6 +516,59 @@ instance CheckType Ast.Expr where
           where msg = "The value `" ++ show expr ++ "` can't be assigned to variable `" ++ name ++ "`"
     else
       return $ Err $ RootCause ("Assignments have type `" ++ show VoidTy ++ "`")
+
+  -- For when the return type IS specified.
+  check (Ast.Def name params (Just retTy) body) expected@(FnTy expectedParamTys expectedRetTy) = do
+    st <- get -- Save current ctx
+    paramTys <- forM params $ \(param, paramTy) -> do
+      define param paramTy
+    bodyRes <- check body expectedRetTy
+    put st -- Restore old ctx
+    case (paramTys == expectedParamTys, bodyRes) of
+      (True, Ok body'@(_ :<: bodyTy)) | retTy == bodyTy -> do
+        let def = Ast.DefF name params (Just retTy) body'
+        define name expected
+        return $ Ok (def :<: expected)
+      (_, Ok (_ :<: bodyTy)) | retTy /= bodyTy -> return $ Err $ RootCause msg
+        where msg = "The function `" ++ name ++ "` has type `" ++ show actualTy ++ "`, not `" ++ show expected ++ "`"
+              actualTy = FnTy paramTys bodyTy
+      (_, Err err) -> return $ (Err err) `addError` msg
+        where msg = "The function `" ++ name ++ "` does not match expected type `" ++ show expected ++ "`"
+
+  -- For when the return type is NOT specified.
+  check (Ast.Def name params Nothing body) expected@(FnTy expectedParamTys expectedRetTy) = do
+    st <- get -- Save current ctx
+    paramTys <- forM params $ \(param, paramTy) -> do
+      define param paramTy
+    bodyRes <- check body expectedRetTy
+    put st -- Restore old ctx
+    case (paramTys == expectedParamTys, bodyRes) of
+      (True, Ok body'@(_ :<: bodyTy)) -> do
+        let def = Ast.DefF name params Nothing body'
+        define name expected
+        return $ Ok (def :<: expected)
+      (_, Err err) -> return $ (Err err) `addError` msg
+        where msg = "The function `" ++ name ++ "` does not match expected type `" ++ show expected ++ "`"
+
+  check (Ast.Mod name items) ty = do
+    itemsRes <- sequenceA <$> mapM infer items
+    case itemsRes of
+      Ok items' -> do
+        let
+          itemBinding :: Ast.TypedExpr -> Res (String, Ty)
+          itemBinding (item :<: ty) = (,) <$> itemName item <*> pure ty
+        case sequenceA $ map itemBinding items' of
+          Ok bindings -> do
+            let modTy = ModTy $ M.fromList $ bindings
+            if modTy <: ty
+              then do
+                define name modTy
+                return $ Ok (Ast.ModF name items' :<: modTy)
+              else do
+                let msg = "Module has type `" ++ show modTy ++ "`, not `" ++ show ty
+                return $ Err $ RootCause msg
+          Err err -> return $ Err err
+      Err err -> return $ Err err
 
   -- Default case.
   check expr ty = do

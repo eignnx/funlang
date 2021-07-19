@@ -4,6 +4,7 @@ module Main where
 
 import qualified Ast
 import qualified Parser
+import           Parser         ( parseFile )
 import qualified Hir
 import qualified TyCheck
 import qualified TypedAstToHir
@@ -52,14 +53,13 @@ getOpts = do
 main :: IO ()
 main = do
   opts <- getOpts
-  src  <- readFile (filename opts)
-  ast  <- parseSrc opts src
+  ast  <- parseFile (filename opts)
   tast <- astToTypedAst opts ast
   hir  <- tastToHir opts tast
   lir  <- hirToLir opts hir
   execVmProgram opts lir
 
-parseSrc :: Opts -> String -> IO Ast.Ast
+parseSrc :: Opts -> String -> IO Ast.Expr
 parseSrc opts src = do
   let ast = Parser.parseSrc (filename opts) src
   when (traceCompilation opts) $ do
@@ -67,7 +67,7 @@ parseSrc opts src = do
     printAst ast
   return ast
 
-astToTypedAst :: Opts -> Ast.Ast -> IO Ast.TypedAst
+astToTypedAst :: Opts -> Ast.Expr -> IO Ast.TypedExpr
 astToTypedAst opts ast = do
   case TyCheck.astToTypedAst ast of
     TyCheck.Ok tast -> do
@@ -80,7 +80,7 @@ astToTypedAst opts ast = do
       exitWith (ExitFailure 1)
 
 
-tastToHir :: Opts -> Ast.TypedAst -> IO [Hir.Instr]
+tastToHir :: Opts -> Ast.TypedExpr -> IO [Hir.Instr]
 tastToHir opts ast = do
   let hir = TypedAstToHir.astToHir ast
   when (traceCompilation opts) $ do
@@ -108,10 +108,10 @@ showAssoc assoc = unlines $ ["{"] ++ pairs ++ ["}"]
     pairs = map formatter assoc
     formatter (key, val) = "\t" ++ show key ++ " = " ++ show val
 
-printAst :: Ast.Ast -> IO ()
+printAst :: Ast.Expr -> IO ()
 printAst ast = print ast
 
-printTypedAst :: Ast.TypedAst -> IO ()
+printTypedAst :: Ast.TypedExpr -> IO ()
 printTypedAst tast = print tast
 
 printHir :: [Hir.Instr] -> IO ()
@@ -123,7 +123,7 @@ printLir lir = putStrLn $ unlines $ zipWith fmt [0..] lir
     fmt :: Int -> Lir.Instr -> String
     fmt i instr = printf "%3d: %s" i (show instr)
 
-compileAndRun :: Ast.Ast -> IO ()
+compileAndRun :: Ast.Expr -> IO ()
 compileAndRun ast = do
   let tast      = case TyCheck.astToTypedAst ast of
                        TyCheck.Ok tast -> tast
