@@ -40,6 +40,9 @@ instance Semigroup a => Semigroup (Res a) where
   (Ok a) <> (Err b) = Err b
   (Err a) <> (Ok b) = Err a
 
+instance Monoid a => Monoid (Res a) where
+  mempty = Ok $ mempty
+
 instance Functor Res where
   fmap f (Ok a) = Ok (f a)
   fmap f (Err e) = Err e
@@ -416,27 +419,35 @@ instance CheckType Ast.Expr where
       Err err -> return $ Err err
 
   infer (Ast.Mod name items) = do
-    skimItemDefs -- First, we need to put all top-level definitions into the Ctx.
-    itemsRes <- mapM infer items
-    case sequenceA itemsRes of
-      Ok items' -> do
-        let mkPair (item :<: ty) = (Ast.itemName item, ty)
-        let modTy = ModTy $ M.fromList $ map mkPair items'
-        let mod = Ast.ModF name items'
-        define name modTy
-        return $ Ok (mod :<: modTy)
-      Err err -> return $ Err err
+    res <- skimItemDefs -- First, we need to put all top-level definitions into the Ctx.
+    case res of
+      Err err -> return $ Err err `addError` ("I got stuck while skimming the contents of `mod " ++ name ++ "`")
+      Ok () -> do
+        itemsRes <- mapM infer items
+        case sequenceA itemsRes of
+          Ok items' -> do
+            let mkPair (item :<: ty) = (Ast.itemName item, ty)
+            let modTy = ModTy $ M.fromList $ map mkPair items'
+            let mod = Ast.ModF name items'
+            define name modTy
+            return $ Ok (mod :<: modTy)
+          Err err -> return $ Err err
     where
+      skimItemDefs :: TyChecker (Res ())
       skimItemDefs =
-        forM_ items $ \case
-          Ast.Def name params (Just retTy) _ -> 
+        mconcat <$> (forM items $ \case
+          Ast.Def name params (Just retTy) _ -> do
             define name $ FnTy (map snd params) retTy
-          Ast.Def name params Nothing _ ->
+            return $ Ok ()
+          Ast.Def name params Nothing _ -> do
             -- Since we don't know the return type, we have to stub for now.
-            define name $ FnTy (map snd params) NeverTy
-          Ast.Mod name _ ->
+            define name $ FnTy (map snd params) NeverTy -- FIXME: see ./ex/rec-problem.rb
+            return $ Ok ()
+          Ast.Mod name _ -> do
             define name $ ModTy M.empty
-          other -> error ("Can't skim one of these: " ++ show other)
+            return $ Ok ()
+          other -> return $ Err $ RootCause msg
+            where msg = "I can't let you put the expression `" ++ show other ++ "` at the top-level of a module.")
 
   -- Default case.
   infer expr = return $ Err $ RootCause $ msg
