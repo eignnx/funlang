@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Ast
   ( ExprF(..)
@@ -24,6 +25,7 @@ module Ast
   , pattern Def
   , pattern Mod
   , itemName
+  , isModLevelItem
   , Seq(..)
   , BinOp(..)
   , ArithOp(..)
@@ -73,6 +75,12 @@ itemName :: ExprF r -> String
 itemName (DefF name _ _ _) = name
 itemName (ModF name _) = name
 itemName _ = error "Internal Compiler Error: Can't get name from item!"
+
+isModLevelItem :: ExprF r -> Bool
+isModLevelItem = \case
+  DefF _ _ _ _ -> True
+  ModF _ _ -> True
+  _ -> False
 
 pattern Var name = Fix (VarF name)
 pattern Literal x = Fix (LiteralF x)

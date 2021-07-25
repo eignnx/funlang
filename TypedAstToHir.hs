@@ -4,7 +4,6 @@ module TypedAstToHir
     ( initialCState
     , astToHir
     , runCompilation
-    , getDefs
     )
 where
 
@@ -18,10 +17,12 @@ import qualified Intr
 import           Control.Monad.State
 import           Data.Foldable
 import qualified Data.Map.Strict               as M
+import           Data.List                     ( find )
+import           Debug.Trace                   ( trace )
 
 data CState = CState
   { lbl_  :: Hir.Lbl
-  , defs_ :: [(String, Hir.Lbl)]
+  , defs_ :: [(String, Hir.Lbl, [Hir.Instr])]
   }
   deriving Show
 
@@ -33,11 +34,14 @@ fresh = do
   modify (\s -> s { lbl_ = lbl + 1 })
   return lbl
 
-define :: String -> Hir.Lbl -> CompState ()
-define name lbl = do
+defineFn :: String -> CompState [Hir.Instr] -> CompState Hir.Lbl
+defineFn name compilation = do
+  lbl <- fresh
+  hir <- compilation
+  let hir' = [Hir.Label lbl] ++ hir -- Label the function.
   defs <- gets defs_
-  modify $ \st -> st { defs_ = (name, lbl) : defs }
-  return ()
+  modify $ \st -> st { defs_ = (name, lbl, hir') : defs }
+  return lbl
 
 class Compile a where
   compile :: a -> CompState [Hir.Instr]
@@ -60,23 +64,13 @@ instance Compile Ast.ArithOp where
 instance Compile Ast.OtherOp where
   compile Ast.Concat = return [Hir.Concat]
 
--- | Checks for expressions whose type is not `Void`. If it finds any, inserts
---   `Hir.Pop` afterwards to discard the value.
-compileTerminatedExprs :: [Ast.TypedExpr] -> CompState [Hir.Instr]
-compileTerminatedExprs exprs = do
-  hir <- forM exprs $ \expr@(_ :<: exprTy) -> do
-    expr' <- compile expr
-    let maybePop = if exprTy <: Ty.VoidTy then [] else [Hir.Pop]
-    return $ expr' ++ maybePop
-  return $ concat hir
-
 instance Compile (Ast.Seq Ast.TypedExpr) where
   
   compile (Ast.Empty) = return []
 
   compile (Ast.Result expr) = compile expr
 
-  compile (Ast.Semi expr@(_ :<: ty) seq)
+  compile (Ast.Semi expr@(exprF :<: ty) seq)
     | ty <: Ty.VoidTy = do -- Already Void type, no need to Pop.
       expr' <- compile expr
       seq' <- compile seq
@@ -84,7 +78,10 @@ instance Compile (Ast.Seq Ast.TypedExpr) where
     | otherwise = do -- This one needs to discard its non-Void result.
       expr' <- compile expr
       seq' <- compile seq
-      return $ expr' ++ [Hir.Pop] ++ seq'
+      let maybePop = if ty <: Ty.VoidTy || Ast.isModLevelItem exprF
+                      then []
+                      else trace (">>>>>>>>>>>>>>>>>>>>>>>>Adding pop after: " ++ show expr) [Hir.Pop]
+      return $ expr' ++ maybePop ++ seq'
 
 instance Compile Ast.TypedExpr where
 
@@ -185,20 +182,26 @@ instance Compile Ast.TypedExpr where
       ++ body'
       ++ [Hir.Jmp top]
 
-  compile (Ast.ModF name items :<: ty) = compile items
+  compile (Ast.ModF name items :<: ty) = do
+    forM_ items $ \item -> do
+      let item' = case item of
+                    Ast.DefF _ _ _ _ :<: _ -> item 
+                    Ast.ModF _ _ :<: _ -> item
+                    _ -> error $ "Can't compile " ++ show item ++ " as module-level item."
+      compile item'
+    return []
 
   compile (Ast.DefF name paramsAndTypes retTy body :<: ty) = do
-    let params = map fst paramsAndTypes
-    lbl <- fresh
-    define name lbl
-    let paramBindings = map Hir.Store $ reverse params
-    let prologue = paramBindings -- First thing we do is store args (from stack) in memory.
-    body' <- compile body
-    let epilogue = [Hir.Ret] -- At the end of every function MUST be a return instr.
-    return $  [Hir.Label lbl] -- Label the function.
-           ++ prologue -- First run the prologue.
-           ++ body' -- Then run the body of the function.
-           ++ epilogue -- Finally, run the epilogue.
+    fnLbl <- defineFn name $ do
+      let params = map fst paramsAndTypes
+      let paramBindings = map Hir.Store $ reverse params
+      let prologue = paramBindings -- First thing we do is store args (from stack) in memory.
+      body' <- compile body
+      let epilogue = [Hir.Ret] -- At the end of every function MUST be a return instr.
+      return $ prologue -- First run the prologue.
+            ++ body'    -- Then run the body of the function.
+            ++ epilogue -- Finally, run the epilogue.
+    return []
 
 instance Compile Ast.UnaryOp where
   compile Ast.Not = return [Hir.Not]
@@ -239,23 +242,23 @@ instance Compile Ast.RelOp where
     Ast.Eq  -> [Hir.Eq]
     Ast.Neq -> [Hir.Eq, Hir.Not]
 
-trampoline :: [(String, Hir.Lbl)] -> [Hir.Instr]
-trampoline defs = globalDefs ++ entryPointJump ++ exit
-  where
-    exit = [Hir.Intrinsic Intr.Exit]
-    globalDefs = defs >>= (\(name, lbl) -> [Hir.Const (Hir.VLbl lbl), Hir.Store name])
-    entryPointJump = [Hir.Const (Hir.VLbl mainLbl), Hir.Call 0]
-      where
-        Just mainLbl = lookup "main" defs
-
-astToHir :: Compile a => a -> [Hir.Instr]
-astToHir ast = trampoline defs ++ hir
-  where (hir, CState { defs_ = defs }) = runCompilation ast
-
 initialCState = CState { lbl_ = Hir.Lbl 0, defs_ = [] }
 
 runCompilation :: Compile a => a -> ([Hir.Instr], CState)
 runCompilation ast = runState (compile ast) initialCState
 
-getDefs ast = defs
-  where (instrs, CState { defs_ = defs }) = runCompilation ast
+trampoline :: [(String, Hir.Lbl, [Hir.Instr])] -> [Hir.Instr]
+trampoline defs = globalDefs ++ entryPointJump ++ exit
+  where
+    exit = [Hir.Intrinsic Intr.Exit]
+    globalDefs = defs >>= (\(name, lbl, hir) -> [Hir.Const (Hir.VLbl lbl), Hir.Store name])
+    entryPointJump = [Hir.Const (Hir.VLbl mainLbl), Hir.Call 0]
+      where
+        Just (_, mainLbl, _) = find (\(name, _, _) -> name == "main") defs
+
+joinDefs :: [(String, Hir.Lbl, [Hir.Instr])] -> [Hir.Instr]
+joinDefs defs = concat $ map (\(name, lbl, hir) -> hir) defs
+
+astToHir :: Compile a => a -> [Hir.Instr]
+astToHir ast = trampoline defs ++ joinDefs defs
+  where (_hir, CState { defs_ = defs }) = runCompilation ast

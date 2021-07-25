@@ -113,8 +113,6 @@ class CheckType a where
   infer :: a -> TyChecker (Res (Checked a))
   check :: a -> Ty -> TyChecker (Res (Checked a))
 
-
-
 instance CheckType (Intr.Intrinsic, [Ast.TypedExpr]) where
 
   type Checked (Intr.Intrinsic, [Ast.TypedExpr]) =
@@ -130,7 +128,7 @@ instance CheckType (Intr.Intrinsic, [Ast.TypedExpr]) where
 
   infer (Intr.Here pos, []) = return $ Ok $ (Intr.Here pos, []) `HasTy` VoidTy
   infer (Intr.Exit, [])     = return $ Ok $ (Intr.Exit, []) `HasTy` NeverTy
-  infer (_, _)         = return $ Err $ RootCause "You passed the wrong number of arguments to an intrinsic"
+  infer (_, _)              = return $ Err $ RootCause "You passed the wrong number of arguments to an intrinsic"
 
   check (_, [args]) = undefined
 

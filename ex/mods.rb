@@ -9,6 +9,7 @@ def main[] do
 
   def blah[] = intr.print["blah"]
 
-  # blah[];
-  nop
+  intr.print["vvvvv  Expecting 'blah' here  vvvvv"];
+  blah[];
+  intr.print["^^^^^ Did 'blah' get printed? ^^^^^"]
 end
