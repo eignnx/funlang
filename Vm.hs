@@ -234,21 +234,28 @@ stepVm instr = do
     --  | <arg 1>
     Lir.Call argC -> do
       fnAddr <- popInstrAddr -- Get the function's entry address.
+      callDirect fnAddr argC
 
-      -- Store the return address above all the args.
-      pc_ <- gets pc
-      let retAddr = pc_ + 1 -- Return to the NEXT instr.
-      pushRetAddr retAddr
+    Lir.CallDirect fnAddr argC -> do
+      callDirect fnAddr argC
 
-      -- Perform the jump.
-      setPc (fnAddr - 1)
-      pushNewFrame
-      return ()
     Lir.Ret -> do
       retAddr <- popRetAddr
       popMemFrame
       setPc (retAddr - 1)
       return ()
+
+callDirect :: Lir.InstrAddr -> Int -> VmProgram ()
+callDirect fnAddr argC = do
+  -- Store the return address above all the args.
+  pc_ <- gets pc
+  let retAddr = pc_ + 1 -- Return to the NEXT instr.
+  pushRetAddr retAddr
+
+  -- Perform the jump.
+  setPc (fnAddr - 1)
+  pushNewFrame
+  return ()
 
 runIntrinsic :: Intr.Intrinsic -> VmProgram ()
 runIntrinsic op = case op of

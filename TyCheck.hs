@@ -16,13 +16,14 @@ where
 
 import qualified Ast
 import           Ast           ( Typed(HasTy), RecTyped(..) )
-import           Ty            ( Ty(..), (<:), (-&&>), (>||<) )
+import           Ty            ( Ty(..), (<:), (-&&>), (>||<), downcastToFnTy )
 import qualified Intr
 import qualified Data.Map      as M
 import           Control.Monad ( foldM )
 import           Data.Semigroup
 import           Control.Monad.State
 import           Control.Applicative
+import           Data.Maybe    ( isJust )
 
 data Res a
   = Ok a
@@ -255,7 +256,8 @@ instance CheckType Ast.Expr where
   infer (Ast.Call fn args) = do
     fnRes <- infer fn
     case fnRes of
-      Ok fn'@(_ :<: FnTy paramTys retTy) -> do
+      Ok fn'@(_ :<: fnTy) | isJust (downcastToFnTy fnTy) -> do
+        let Just (paramTys, retTy) = downcastToFnTy fnTy
         argsRes <- checkArgs paramTys
         case argsRes of
           Ok args' -> do
@@ -399,7 +401,8 @@ instance CheckType Ast.Expr where
     case bodyRes of
       Ok typedBody@(_ :<: bodyTy) -> do
         let def = Ast.DefF name params (Just retTy) typedBody
-        return $ Ok (def :<: (FnTy paramTys bodyTy))
+        let ty = Fixed $ FnTy paramTys bodyTy
+        return $ Ok (def :<: ty)
       Err err -> return $ Err err
 
   -- For when the return type is NOT specified.
@@ -413,7 +416,7 @@ instance CheckType Ast.Expr where
     case bodyRes of
       Ok typedBody@(_ :<: bodyTy) -> do
         let def = Ast.DefF name params (Just bodyTy) typedBody
-        let ty = FnTy paramTys bodyTy
+        let ty = Fixed $ FnTy paramTys bodyTy
         define name ty -- We MUST save the full type now.
         return $ Ok (def :<: ty)
       Err err -> return $ Err err
@@ -437,11 +440,11 @@ instance CheckType Ast.Expr where
       skimItemDefs =
         mconcat <$> (forM items $ \case
           Ast.Def name params (Just retTy) _ -> do
-            define name $ FnTy (map snd params) retTy
+            define name $ Fixed $ FnTy (map snd params) retTy
             return $ Ok ()
           Ast.Def name params Nothing _ -> do
             -- Since we don't know the return type, we have to stub for now.
-            define name $ FnTy (map snd params) NeverTy -- FIXME: see ./ex/rec-problem.rb
+            define name $ Fixed $ FnTy (map snd params) NeverTy -- FIXME: see ./ex/rec-problem.rb
             return $ Ok ()
           Ast.Mod name _ -> do
             define name $ ModTy M.empty
@@ -527,7 +530,8 @@ instance CheckType Ast.Expr where
       return $ Err $ RootCause ("Assignments have type `" ++ show VoidTy ++ "`")
 
   -- For when the return type IS specified.
-  check (Ast.Def name params (Just retTy) body) expected@(FnTy expectedParamTys expectedRetTy) = do
+  check (Ast.Def name params (Just retTy) body) expected | isJust (downcastToFnTy expected) = do
+    let Just (expectedParamTys, expectedRetTy) = downcastToFnTy expected
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
       define param paramTy
@@ -536,16 +540,18 @@ instance CheckType Ast.Expr where
     case (paramTys == expectedParamTys, bodyRes) of
       (True, Ok body'@(_ :<: bodyTy)) | retTy == bodyTy -> do
         let def = Ast.DefF name params (Just retTy) body'
-        define name expected
-        return $ Ok (def :<: expected)
+        let actualTy = Fixed $ FnTy paramTys bodyTy
+        define name actualTy
+        return $ Ok (def :<: actualTy)
       (_, Ok (_ :<: bodyTy)) | retTy /= bodyTy -> return $ Err $ RootCause msg
         where msg = "The function `" ++ name ++ "` has type `" ++ show actualTy ++ "`, not `" ++ show expected ++ "`"
-              actualTy = FnTy paramTys bodyTy
+              actualTy = Fixed $ FnTy paramTys bodyTy
       (_, Err err) -> return $ (Err err) `addError` msg
         where msg = "The function `" ++ name ++ "` does not match expected type `" ++ show expected ++ "`"
 
   -- For when the return type is NOT specified.
-  check (Ast.Def name params Nothing body) expected@(FnTy expectedParamTys expectedRetTy) = do
+  check (Ast.Def name params Nothing body) expected | isJust (downcastToFnTy expected) = do
+    let Just (expectedParamTys, expectedRetTy) = downcastToFnTy expected
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
       define param paramTy
@@ -554,8 +560,9 @@ instance CheckType Ast.Expr where
     case (paramTys == expectedParamTys, bodyRes) of
       (True, Ok body'@(_ :<: bodyTy)) -> do
         let def = Ast.DefF name params Nothing body'
-        define name expected
-        return $ Ok (def :<: expected)
+        let actualTy = Fixed $ FnTy paramTys bodyTy
+        define name actualTy
+        return $ Ok (def :<: actualTy)
       (_, Err err) -> return $ (Err err) `addError` msg
         where msg = "The function `" ++ name ++ "` does not match expected type `" ++ show expected ++ "`"
 

@@ -43,6 +43,12 @@ defineFn name compilation = do
   modify $ \st -> st { defs_ = (name, lbl, hir') : defs }
   return lbl
 
+lookupFn :: String -> CompState Hir.Lbl
+lookupFn name = do
+  defs <- gets defs_
+  let Just (_, lbl, _) = find (\(n, _, _) -> n == name) defs
+  return lbl
+
 class Compile a where
   compile :: a -> CompState [Hir.Instr]
 
@@ -86,6 +92,13 @@ instance Compile (Ast.Seq Ast.TypedExpr) where
 instance Compile Ast.TypedExpr where
 
   compile (Ast.BlockF seq :<: ty) = compile seq
+
+  compile (Ast.CallF (Ast.VarF name :<: Ty.Fixed f) args :<: resTy) = do
+    args' <- compile args -- Using `instance Compile a => Compile [a]`
+    lbl <- lookupFn name -- FIXME: Ensure this works when fn names are shadowed.
+    let argC = length args
+    return $ args' -- Code to push the arguments
+           ++ [Hir.CallDirect lbl argC]
 
   compile (Ast.VarF name :<: ty) =
     if ty <: Ty.VoidTy then

@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module ToLir
   ( hirToLir
   )
@@ -36,56 +38,46 @@ findLbls instrs = go instrs 0 M.empty
 --
 translateInstr :: LblMap -> Hir.Instr -> Lir.Instr
 translateInstr labels instr = case instr of
-  Hir.Load  var       -> Lir.Load var
-  Hir.Store var       -> Lir.Store var
-  Hir.Const val       -> Lir.Const $ translateValue labels val
-  Hir.Dup             -> Lir.Dup
-  Hir.Over            -> Lir.Over
-  Hir.Rot             -> Lir.Rot
-  Hir.Swap            -> Lir.Swap
-  Hir.Pop             -> Lir.Pop
-  Hir.Add             -> Lir.Add
-  Hir.Sub             -> Lir.Sub
-  Hir.Mul             -> Lir.Mul
-  Hir.Div             -> Lir.Div
-  Hir.Neg             -> Lir.Neg
-  Hir.And             -> Lir.And
-  Hir.Or              -> Lir.Or
-  Hir.Not             -> Lir.Not
-  Hir.Eq              -> Lir.Eq
-  Hir.Gt              -> Lir.Gt
-  Hir.Lt              -> Lir.Lt
-  Hir.Concat          -> Lir.Concat
-  Hir.Label      lbl  -> Lir.Nop -- Labels are translated to no-ops.
-  Hir.JmpIfFalse lbl  -> translateJmp lbl Lir.JmpIfFalse labels
-  Hir.Jmp        lbl  -> translateJmp lbl Lir.Jmp labels
-  Hir.Intrinsic  intr -> Lir.Intrinsic intr
-  Hir.Call       argC -> Lir.Call argC
-  Hir.Ret             -> Lir.Ret
-  Hir.Nop             -> Lir.Nop
+  Hir.Load  var           -> Lir.Load var
+  Hir.Store var           -> Lir.Store var
+  Hir.Const val           -> Lir.Const $ translateValue labels val
+  Hir.Dup                 -> Lir.Dup
+  Hir.Over                -> Lir.Over
+  Hir.Rot                 -> Lir.Rot
+  Hir.Swap                -> Lir.Swap
+  Hir.Pop                 -> Lir.Pop
+  Hir.Add                 -> Lir.Add
+  Hir.Sub                 -> Lir.Sub
+  Hir.Mul                 -> Lir.Mul
+  Hir.Div                 -> Lir.Div
+  Hir.Neg                 -> Lir.Neg
+  Hir.And                 -> Lir.And
+  Hir.Or                  -> Lir.Or
+  Hir.Not                 -> Lir.Not
+  Hir.Eq                  -> Lir.Eq
+  Hir.Gt                  -> Lir.Gt
+  Hir.Lt                  -> Lir.Lt
+  Hir.Concat              -> Lir.Concat
+  Hir.Label      lbl      -> Lir.Nop -- Labels are translated to no-ops.
+  Hir.JmpIfFalse lbl      -> Lir.JmpIfFalse $ translateLbl labels lbl
+  Hir.Jmp        lbl      -> Lir.Jmp $ translateLbl labels lbl
+  Hir.Intrinsic  intr     -> Lir.Intrinsic intr
+  Hir.Call       argC     -> Lir.Call argC
+  Hir.CallDirect lbl argC -> Lir.CallDirect (translateLbl labels lbl) argC
+  Hir.Ret                 -> Lir.Ret
+  Hir.Nop                 -> Lir.Nop
+
+translateLbl :: LblMap -> Hir.Lbl -> Lir.InstrAddr
+translateLbl labels lbl =
+  case M.lookup lbl labels of
+    Just instrAddr -> instrAddr
+    Nothing -> error $ "Internal Compilation Error: Unknown label: " ++ show lbl
 
 translateValue :: LblMap
                -> Hir.Value
                -> Lir.Value
-translateValue labels hirVal =
-  case hirVal of
-    Hir.VInt x -> Lir.VInt x
-    Hir.VBool x -> Lir.VBool x
-    Hir.VString x -> Lir.VString x
-    Hir.VLbl lbl ->
-      case M.lookup lbl labels of
-        Just instrAddr -> Lir.VInstrAddr instrAddr
-        Nothing -> error $ "Internal Compilation Error: Unknown label: " ++ show lbl
-      
-
-translateJmp :: Hir.Lbl
-             -> (Lir.InstrAddr -> Lir.Instr)
-             -> LblMap
-             -> Lir.Instr
-translateJmp lbl jmpConstructor labels =
-  case M.lookup lbl labels of
-    Just idx -> jmpConstructor idx
-    Nothing ->
-      error $ "Internal Compilation Error: Unknown label: " ++ show lbl
-
--------------------------------------------------------------------
+translateValue labels = \case
+  Hir.VInt x -> Lir.VInt x
+  Hir.VBool x -> Lir.VBool x
+  Hir.VString x -> Lir.VString x
+  Hir.VLbl lbl -> Lir.VInstrAddr $ translateLbl labels lbl

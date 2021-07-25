@@ -53,5 +53,6 @@ data Instr
   | Intrinsic Intr.Intrinsic
   | Call Int -- `Call n` calls the TOS function pointer with the remaining `n`
              -- TOS-values as args
+  | CallDirect Lbl Int -- Calls a function whose type is `Fixed[a -> b]`.
   | Ret -- Jump back to return address
   deriving (Show)

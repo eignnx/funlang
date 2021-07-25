@@ -58,5 +58,6 @@ data Instr
   | Jmp InstrAddr
   | Intrinsic Intr.Intrinsic
   | Call Int
+  | CallDirect InstrAddr Int
   | Ret -- Jump back to return address
   deriving (Show)
