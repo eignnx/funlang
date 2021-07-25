@@ -71,16 +71,19 @@ data ExprF r
   | DefF String [(String, Ty.Ty)] (Maybe Ty.Ty) r
   | ModF String [r]
 
-itemName :: ExprF r -> String
-itemName (DefF name _ _ _) = name
-itemName (ModF name _) = name
-itemName _ = error "Internal Compiler Error: Can't get name from item!"
+itemName :: ExprF r -> Maybe String
+itemName = \case
+  DefF name _ _ _ -> Just name
+  ModF name _     -> Just name
+  LetF name _     -> Just name
+  _               -> Nothing
 
 isModLevelItem :: ExprF r -> Bool
 isModLevelItem = \case
   DefF _ _ _ _ -> True
-  ModF _ _ -> True
-  _ -> False
+  ModF _ _     -> True
+  LetF _ _     -> True
+  _            -> False
 
 pattern Var name = Fix (VarF name)
 pattern Literal x = Fix (LiteralF x)

@@ -2,10 +2,12 @@ mod Foo
   def foo[x: Int] -> Int do
     x + 1
   end
+
+  let MyFavNum = 49
 end
 
 def main[] do
-  intr.print[foo[1]];
+  intr.print[foo[MyFavNum]];
 
   def blah[] = intr.print["blah"]
 

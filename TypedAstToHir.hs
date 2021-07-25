@@ -198,12 +198,10 @@ instance Compile Ast.TypedExpr where
       ++ [Hir.Jmp top]
 
   compile (Ast.ModF name items :<: ty) = do
-    forM_ items $ \item -> do
-      let item' = case item of
-                    Ast.DefF _ _ _ _ :<: _ -> item 
-                    Ast.ModF _ _ :<: _ -> item
-                    _ -> error $ "Can't compile " ++ show item ++ " as module-level item."
-      compile item'
+    forM_ items $ \item@(itemF :<: _) -> do
+      if Ast.isModLevelItem itemF
+        then compile item
+        else error $ "Can't compile `" ++ show item ++ "` as a mod-level item!"
     return []
 
   compile (Ast.DefF name paramsAndTypes retTy body :<: ty) = do

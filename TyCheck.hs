@@ -196,12 +196,8 @@ inferBinOp op argTy retTy e1 e2 = do
       (a, b) -> return (a *> b)
 
 itemName :: Show (Ast.ExprF r) => Ast.ExprF r -> Res String
-itemName = \case
-  Ast.DefF name _ _ _ -> Ok name
-  Ast.ModF name _ -> Ok name
-  Ast.LetF name _ -> Ok name
-  other -> Err $ RootCause msg
-    where msg = "The expression `" ++ show other ++ "` can't appear in the top level."
+itemName expr = Ast.itemName expr `toRes` RootCause msg
+  where msg = "The expression `" ++ show expr ++ "` can't appear in the top level."
 
 instance CheckType Ast.Expr where
 
@@ -429,7 +425,7 @@ instance CheckType Ast.Expr where
         itemsRes <- mapM infer items
         case sequenceA itemsRes of
           Ok items' -> do
-            let mkPair (item :<: ty) = (Ast.itemName item, ty)
+            let mkPair (item :<: ty) = (maybe (error "bad item name!") id $ Ast.itemName item, ty)
             let modTy = ModTy $ M.fromList $ map mkPair items'
             let mod = Ast.ModF name items'
             define name modTy
