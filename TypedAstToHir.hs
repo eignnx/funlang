@@ -22,7 +22,7 @@ import           Debug.Trace                   ( trace )
 
 data CState = CState
   { lbl_  :: Hir.Lbl
-  , defs_ :: [(String, Hir.Lbl, [Hir.Instr])]
+  , defs_ :: [(String, Hir.Value, [Hir.Instr])]
   }
   deriving Show
 
@@ -40,14 +40,14 @@ defineFn name compilation = do
   hir <- compilation
   let hir' = [Hir.Label lbl] ++ hir -- Label the function.
   defs <- gets defs_
-  modify $ \st -> st { defs_ = (name, lbl, hir') : defs }
+  modify $ \st -> st { defs_ = (name, Hir.VLbl lbl, hir') : defs }
   return lbl
 
-lookupFn :: String -> CompState Hir.Lbl
-lookupFn name = do
+lookupFixed :: String -> CompState Hir.Value
+lookupFixed name = do
   defs <- gets defs_
-  let Just (_, lbl, _) = find (\(n, _, _) -> n == name) defs
-  return lbl
+  let Just (_, value, _) = find (\(n, _, _) -> n == name) defs
+  return value
 
 class Compile a where
   compile :: a -> CompState [Hir.Instr]
@@ -95,16 +95,18 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.CallF (Ast.VarF name :<: Ty.Fixed f) args :<: resTy) = do
     args' <- compile args -- Using `instance Compile a => Compile [a]`
-    lbl <- lookupFn name -- FIXME: Ensure this works when fn names are shadowed.
+    value <- lookupFixed name -- FIXME: Ensure this works when fn names are shadowed.
+    let Hir.VLbl lbl = value
     let argC = length args
     return $ args' -- Code to push the arguments
            ++ [Hir.CallDirect lbl argC]
 
-  compile (Ast.VarF name :<: ty) =
-    if ty <: Ty.VoidTy then
-      return []
-    else
-      return [Hir.Load name]
+  compile (Ast.VarF name :<: ty)
+    | ty <: Ty.VoidTy = return []
+    | Ty.isFixed ty = do
+      value <- lookupFixed name
+      return [Hir.Const value]
+    | otherwise = return [Hir.Load name]
 
   compile (Ast.LiteralF lit   :<: ty) = return [Hir.Const (valueFromLit lit)]
 
@@ -260,17 +262,19 @@ initialCState = CState { lbl_ = Hir.Lbl 0, defs_ = [] }
 runCompilation :: Compile a => a -> ([Hir.Instr], CState)
 runCompilation ast = runState (compile ast) initialCState
 
-trampoline :: [(String, Hir.Lbl, [Hir.Instr])] -> [Hir.Instr]
-trampoline defs = globalDefs ++ entryPointJump ++ exit
+trampoline :: [(String, Hir.Value, [Hir.Instr])] -> [Hir.Instr]
+trampoline defs = entryPointJump ++ exit
   where
     exit = [Hir.Intrinsic Intr.Exit]
-    globalDefs = defs >>= (\(name, lbl, hir) -> [Hir.Const (Hir.VLbl lbl), Hir.Store name])
-    entryPointJump = [Hir.Const (Hir.VLbl mainLbl), Hir.Call 0]
+    entryPointJump = [Hir.CallDirect mainLbl 0]
       where
-        Just (_, mainLbl, _) = find (\(name, _, _) -> name == "main") defs
+        mainLbl = case find (\(name, _, _) -> name == "main") defs of
+                    Just (_, Hir.VLbl lbl, _) -> lbl
+                    Nothing -> error $ "Couldn't find `def main`!"
 
-joinDefs :: [(String, Hir.Lbl, [Hir.Instr])] -> [Hir.Instr]
-joinDefs defs = concat $ map (\(name, lbl, hir) -> hir) defs
+
+joinDefs :: [(String, Hir.Value, [Hir.Instr])] -> [Hir.Instr]
+joinDefs defs = concat $ map (\(_, _, hir) -> hir) defs
 
 astToHir :: Compile a => a -> [Hir.Instr]
 astToHir ast = trampoline defs ++ joinDefs defs

@@ -12,6 +12,8 @@ module Ty
   , (<:)
   , (-&&>)
   , (>||<)
+  , isFixed
+  , downcastFixed
   , downcastToFnTy
   )
 where
@@ -65,6 +67,15 @@ sub >||< super | sub <: super = super
 super >||< sub | sub <: super = super
 _ >||< _ = error "Operator `>||<` can only accept types that are related!"
 
+isFixed :: Ty -> Bool
+isFixed = \case
+  Fixed _ -> True
+  _ -> False
+
+downcastFixed :: Ty -> Maybe Ty
+downcastFixed = \case
+  Fixed a -> Just a
+  _ -> Nothing
 
 downcastToFnTy :: Ty -> Maybe ([Ty], Ty)
 downcastToFnTy = \case
