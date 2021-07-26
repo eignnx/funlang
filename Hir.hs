@@ -23,7 +23,7 @@ data Value
   | VBool Bool
   | VString String
   | VLbl Lbl
-  deriving (Show)
+  deriving (Show, Eq)
 
 data Instr
   = Load String

@@ -3,7 +3,7 @@ mod Foo
     x + 1
   end
 
-  let MyFavNum = 49
+  let MyFavNum = 7 + -49 * 3 / 2
 end
 
 def main[] do

@@ -16,7 +16,7 @@ where
 
 import qualified Ast
 import           Ast           ( Typed(HasTy), RecTyped(..) )
-import           Ty            ( Ty(..), (<:), (-&&>), (>||<), downcastToFnTy, addAttr )
+import           Ty            ( Ty(..), (<:), (-&&>), (>||<), downcastToFnTy, addAttr, isFixed )
 import qualified Intr
 import qualified Data.Map      as M
 import           Control.Monad ( foldM )
@@ -173,7 +173,9 @@ inferUnaryOp op argTy retTy expr = do
   exprRes <- check expr argTy
   case exprRes of
     Ok expr'@(_ :<: exprTy) -> do
-      let ty = exprTy -&&> retTy
+      let ty = if isFixed exprTy
+                then (exprTy -&&> retTy) `addAttr` Fixed
+                else exprTy -&&> retTy
       return $ Ok (Ast.UnaryF op expr' :<: ty)
     Err err -> return $ Err err
 
@@ -191,7 +193,9 @@ inferBinOp op argTy retTy e1 e2 = do
     e2Ty <- check e2 argTy
     case (e1Ty, e2Ty) of
       (Ok e1'@(_  :<: ty1), Ok e2'@(_ :<: ty2)) -> do
-        let ty = ty1 -&&> ty2 -&&> retTy
+        let ty = if isFixed ty1 && isFixed ty2
+                   then (ty1 -&&> ty2 -&&> retTy) `addAttr` Fixed
+                   else ty1 -&&> ty2 -&&> retTy
         return $ Ok (Ast.BinaryF op e1' e2' :<: ty)
       (a, b) -> return (a *> b)
 
@@ -501,7 +505,7 @@ instance CheckType Ast.Expr where
 --   --   -- check ctx (App (FnExpr var body) binding) ty
 
   check (Ast.Let name expr) ty =
-    if ty == VoidTy then do
+    if ty <: VoidTy then do
       res <- infer expr
       case res of
         Ok expr'@(_ :<: exprTy) -> do
