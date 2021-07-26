@@ -26,6 +26,7 @@ module Ast
   , pattern Mod
   , itemName
   , isModLevelItem
+  , modLevelItemTy
   , Seq(..)
   , BinOp(..)
   , ArithOp(..)
@@ -46,6 +47,7 @@ where
 import qualified Ty
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
 import           Data.List                         ( isPrefixOf, intercalate )
+import qualified Data.Map                          as M
 
 -- This type used to be called `Expr` (see [this commit](1)), but was rewritten
 -- to use an F-Algebra (I think that's right?), and backwards-compatible
@@ -84,6 +86,23 @@ isModLevelItem = \case
   ModF _ _     -> True
   LetF _ _     -> True
   _            -> False
+
+modLevelItemTy :: TypedExpr -> Ty.Ty
+modLevelItemTy = \case
+
+  DefF _ params Nothing (_ :<: bodyTy) :<: _ ->
+    Ty.FnTy (map snd params) bodyTy `Ty.addAttr` Ty.Fixed
+
+  DefF _ params (Just retTy) _ :<: _ ->
+    Ty.FnTy (map snd params) retTy `Ty.addAttr` Ty.Fixed
+
+  ModF _ items :<: _ ->
+    (Ty.ModTy $ M.fromList $ pairs) `Ty.addAttr` Ty.Fixed
+      where getItemName (item :<: _) = maybe (error "") id $ itemName item
+            pairs = zip (map getItemName items) (map modLevelItemTy items)
+
+  LetF _ (exprF :<: ty) :<: _ ->
+    ty `Ty.addAttr` Ty.Fixed -- Just return the type of `e` in `let x = e`.
 
 pattern Var name = Fix (VarF name)
 pattern Literal x = Fix (LiteralF x)

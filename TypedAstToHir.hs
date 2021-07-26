@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 
 module TypedAstToHir
     ( initialCState
@@ -12,6 +13,7 @@ import           Ty                           ( (<:) )
 import qualified Ast
 import           Ast                          ( Typed(..), RecTyped(..) )
 import qualified Hir
+import qualified Comptime
 import qualified Intr
 
 import           Control.Monad.State
@@ -43,11 +45,18 @@ defineFn name compilation = do
   modify $ \st -> st { defs_ = (name, Hir.VLbl lbl, hir') : defs }
   return lbl
 
+defineFixedValue :: String -> Hir.Value -> CompState ()
+defineFixedValue name value = do
+  defs <- gets defs_
+  modify $ \st -> st { defs_ = (name, value, []) : defs }
+  return ()
+
 lookupFixed :: String -> CompState Hir.Value
 lookupFixed name = do
   defs <- gets defs_
-  let Just (_, value, _) = find (\(n, _, _) -> n == name) defs
-  return value
+  case find (\(n, _, _) -> n == name) defs of
+    Just (_, value, _) -> return value
+    Nothing -> error $ "Internal Compiler Error: Unknown fixed binding `" ++ name ++ "`"
 
 class Compile a where
   compile :: a -> CompState [Hir.Instr]
@@ -151,10 +160,17 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.AnnF expr _ :<: ty)   = compile expr
 
-  compile (Ast.LetF var expr@(_ :<: exprTy) :<: ty) = do
-    expr' <- compile expr
-    let maybeStore = if exprTy <: Ty.VoidTy then [] else [Hir.Store var]
-    return $ expr' ++ maybeStore
+  compile (Ast.LetF name expr@(_ :<: exprTy) :<: _)
+    | exprTy <: Ty.VoidTy = do
+      expr' <- compile expr
+      return $ expr'
+    | Ty.isFixed exprTy = do
+      let value = Comptime.eval expr
+      defineFixedValue name value
+      return []
+    | otherwise = do
+      expr' <- compile expr
+      return $ expr' ++ [Hir.Store name]
 
   compile (Ast.AssignF var expr@(_ :<: exprTy) :<: ty) = do
     expr' <- compile expr

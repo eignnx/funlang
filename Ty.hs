@@ -15,6 +15,7 @@ module Ty
   , isFixed
   , downcastFixed
   , downcastToFnTy
+  , addAttr
   )
 where
 
@@ -82,3 +83,6 @@ downcastToFnTy = \case
   Fixed (FnTy a b) -> Just (a, b)
   FnTy a b -> Just (a, b)
   _ -> Nothing
+
+addAttr :: Ty -> (Ty -> Ty) -> Ty
+ty `addAttr` f = f ty
