@@ -19,7 +19,8 @@ module Ty
   )
 where
 
-import qualified Data.Map as M
+import           Utils     ( (+++), code, codeIdent, indent )
+import qualified Data.Map  as M
 import           Data.List ( intercalate )
 
 data Ty
@@ -31,8 +32,8 @@ data Ty
 
 instance Show Ty where
   show (ValTy name) = name
-  show (FnTy params ret) = show params ++ " -> " ++ show ret
-  show (ModTy m) = "{ " ++ intercalate ", " ((\(name, ty) -> name ++ ": " ++ show ty) <$> M.toList m) ++ " }"
+  show (FnTy params ret) = show params +++ "->" +++ show ret
+  show (ModTy m) = "{" +++ intercalate ", " ((\(name, ty) -> name ++ ":" +++ show ty) <$> M.toList m) +++ "}"
   show (Fixed ty) = "Fixed[" ++ show ty ++ "]"
 
 (<:) :: Ty -> Ty -> Bool

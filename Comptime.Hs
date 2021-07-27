@@ -42,6 +42,8 @@ eval = \case
   -- Ast.IfF r r r
   -- Ast.AnnF r Ty.Ty
 
+  other -> error $ "I don't yet know how to evaluate `" ++ show other ++ "` at compile time. Sorry!"
+
 evalIntIntBinOp :: (Int -> Int -> Int) -> Ast.TypedExpr -> Ast.TypedExpr -> Hir.Value
 evalIntIntBinOp op x y = let
   Hir.VInt x' = eval x

@@ -36,7 +36,6 @@ module Ast
   , Lit(..)
   , UnaryOp(..)
   , Expr
-  , Fix(..)
   , isEndTerminated
   , Typed(..)
   , RecTyped(..)
@@ -45,8 +44,10 @@ module Ast
 where
 
 import qualified Ty
+import           Cata                              ( Fix(..), unfix )
+import           Utils                             ( (+++), code, indent )
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
-import           Data.List                         ( isPrefixOf, intercalate )
+import           Data.List                         ( intercalate )
 import qualified Data.Map                          as M
 
 -- This type used to be called `Expr` (see [this commit](1)), but was rewritten
@@ -198,10 +199,6 @@ data UnaryOp
   | Neg
   deriving (Show)
 
-newtype Fix f = Fix (f (Fix f))
-unfix :: Fix f -> f (Fix f)
-unfix (Fix f) = f
-
 type Expr = Fix ExprF
 
 class IsEndTerminated a where
@@ -228,15 +225,6 @@ unRecTyped (f :<: _) = f
 
 type TypedExpr = RecTyped ExprF
 
-indent :: String -> String
-indent txt = replace "\n" "\n  " txt
-  where 
-    -- From: https://programming-idioms.org/idiom/63/replace-fragment-of-a-string/976/haskell
-    replace _ _ [] = []
-    replace from to input = if isPrefixOf from input
-      then to ++ replace from to (drop (length from) input)
-      else head input : replace from to (tail input)
-
 showParams :: [(String, Ty.Ty)] -> String
 showParams params = intercalate ", " $ map pairFmt params
   where pairFmt (param, ty) = param ++ ": " ++ show ty
@@ -249,39 +237,39 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (UnaryF Not x) = "not " ++ show x
   show (UnaryF Neg x) = "-(" ++ show x ++ ")"
   show (BinaryF op x y) = case op of
-    ArithOp Add    -> show x ++ " + " ++ show y
-    ArithOp Sub    -> show x ++ " - " ++ show y
-    ArithOp Mul    -> show x ++ " * " ++ show y
-    ArithOp Div    -> show x ++ " / " ++ show y
-    BoolOp And     -> show x ++ " and " ++ show y
-    BoolOp Or      -> show x ++ " or " ++ show y
-    BoolOp Xor     -> show x ++ " xor " ++ show y
-    RelOp Gt       -> show x ++ " > " ++ show y
-    RelOp Lt       -> show x ++ " < " ++ show y
-    RelOp Eq       -> show x ++ " == " ++ show y
-    RelOp Neq      -> show x ++ " != " ++ show y
-    OtherOp Concat -> show x ++ " ++ " ++ show y
+    ArithOp Add    -> show x +++ "+" +++ show y
+    ArithOp Sub    -> show x +++ "-" +++ show y
+    ArithOp Mul    -> show x +++ "*" +++ show y
+    ArithOp Div    -> show x +++ "/" +++ show y
+    BoolOp And     -> show x +++ "and" +++ show y
+    BoolOp Or      -> show x +++ "or" +++ show y
+    BoolOp Xor     -> show x +++ "xor" +++ show y
+    RelOp Gt       -> show x +++ ">" +++ show y
+    RelOp Lt       -> show x +++ "<" +++ show y
+    RelOp Eq       -> show x +++ "==" +++ show y
+    RelOp Neq      -> show x +++ "!=" +++ show y
+    OtherOp Concat -> show x +++ "++" +++ show y
   show (BlockF Empty) = "do end"
-  show (BlockF seq) = "do" ++ indent ("\n" ++ show seq) ++ "\nend"
+  show (BlockF seq) = "do" ++ indent (show seq) ++ "\nend"
   show (CallF f args) = show f ++ show args
   show (IntrinsicF pos name args) = "intr." ++ name ++ show args
-  show (LetF name e) = "let " ++ name ++ " = " ++ show e
-  show (AssignF name e) = name ++ " = " ++ show e
-  show (RetF e) = "ret " ++ show e
-  show (IfF cond yes no) = "if " ++ show cond ++ " then" ++ indent ("\n" ++ show yes) ++ "\nelse" ++ indent ("\n" ++ show no) ++ "\nend"
-  show (WhileF cond body) = "while " ++ show cond ++ " " ++ show body
-  show (LoopF body) = "loop " ++ show body
+  show (LetF name e) = "let" +++ name +++ "=" +++ show e
+  show (AssignF name e) = name +++ "=" +++ show e
+  show (RetF e) = "ret" +++ show e
+  show (IfF cond yes no) = "if" +++ show cond +++ "then" ++ indent (show yes) ++ "\nelse" ++ indent (show no) ++ "\nend"
+  show (WhileF cond body) = "while" +++ show cond +++ show body
+  show (LoopF body) = "loop" +++ show body
   show NopF = "nop"
-  show (AnnF e t) = show e ++ ": " ++ show t
+  show (AnnF e t) = show e ++ ":" +++ show t
   show (DefF name paramsAndTys (Just retTy) body) =
-    "def " ++ name ++ "[" ++ showParams paramsAndTys ++ "] -> " ++ show retTy ++ " " ++ show body
+    "def" +++ name ++ "[" ++ showParams paramsAndTys ++ "] ->" +++ show retTy +++ show body
   show (DefF name paramsAndTys Nothing body) =
-    "def " ++ name ++ "[" ++ showParams paramsAndTys ++ "] = " ++ indent (show body)
+    "def" +++ name ++ "[" ++ showParams paramsAndTys ++ "] =" +++ indent (show body)
   show (ModF name items) =
-    "mod " ++ name ++ indent ("\n" ++ intercalate "\n\n" (map show items)) ++ "\nend"
+    "mod" +++ name ++ indent (intercalate "\n\n" (map show items)) ++ "\nend"
 
 instance Show TypedExpr where
-  show (e :<: t) = "(" ++ show e ++ " : " ++ show t ++ ")"
+  show (e :<: t) = "(" ++ show e +++ ":" +++ show t ++ ")"
 
 instance Show Expr where
   show (Fix e) = show e

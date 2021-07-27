@@ -3,7 +3,7 @@ mod Foo
     x + 1
   end
 
-  let MyFavNum = 7 + -49 * 3 / 2
+  let MyFavNum = 7 + -49 * 3 / if 1 then true else "adf" end
 end
 
 def main[] do
