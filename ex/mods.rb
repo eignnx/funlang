@@ -3,11 +3,12 @@ mod Foo
     x + 1
   end
 
-  let MyFavNum = 7 + -49 * 3 / if true then 2 else 3 end
+  static MyFavNum = 7 + -49 * 3 / if true then 2 else 3 end
+  static MySecondFavNum = MyFavNum + 100
 end
 
 def main[] do
-  intr.print[foo[MyFavNum]];
+  intr.print[foo[MySecondFavNum]];
 
   def blah[] = intr.print["blah"]
 

@@ -321,6 +321,19 @@ instance CheckType Ast.Expr where
       Err err -> return $ Err err `addError` msg
         where msg = "I can't assign to the undeclared variable" +++ codeIdent name
 
+  infer (Ast.Static name expr) = do
+    exprRes <- infer expr
+    case exprRes of
+      Ok expr'@(_ :<: exprTy)
+        | isFixed exprTy -> do
+          define name exprTy
+          let static = Ast.StaticF name expr'
+          return $ Ok (static :<: (exprTy -&&> VoidTy))
+        | otherwise -> return $ Err $ RootCause msg
+          where msg = "I can't set" +++ codeIdent name +++ "to" +++ code expr +++ "because the expression isn't static"
+      err -> return $ err `addError` msg
+        where msg = "The declaration of" +++ codeIdent name +++ "doesn't type check"
+
   infer (Ast.Ret expr) = do
     fnRetTy <- getFnRetTy
     exprRes <- check expr fnRetTy
@@ -448,7 +461,7 @@ instance CheckType Ast.Expr where
           Ast.Mod name _ -> do
             define name $ ModTy M.empty `addAttr` Fixed
             return $ Ok ()
-          Ast.Let name _ -> do
+          Ast.Static name _ -> do
             define name $ NeverTy `addAttr` Fixed
             return $ Ok ()
           other -> return $ Err $ RootCause msg
@@ -530,6 +543,19 @@ instance CheckType Ast.Expr where
           where msg = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
     else
       return $ Err $ RootCause ("Assignments have type" +++ code VoidTy)
+
+  check (Ast.Static name expr) ty =
+    if ty <: VoidTy then do
+      res <- infer expr
+      case res of
+        Ok expr'@(_ :<: exprTy) -> do
+          define name exprTy
+          let static = Ast.StaticF name expr'
+          return $ Ok (static :<: (exprTy -&&> VoidTy))
+        err -> return $ err `addError` msg
+          where msg = "The declaration of" +++ codeIdent name +++ "needs a type annotation"
+    else
+      return $ Err $ RootCause ("A static declaration has type" +++ code VoidTy)
 
   -- For when the return type IS specified.
   check (Ast.Def name params (Just retTy) body) expected | expected <: VoidTy = do
