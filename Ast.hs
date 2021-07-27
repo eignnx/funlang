@@ -44,12 +44,11 @@ module Ast
 where
 
 import qualified Ty
-import           Cata                              ( Fix(..), unfix )
+import           Cata                              ( Fix(..), RecTyped(..), Unwrap(..), cata )
 import           Utils                             ( (+++), code, indent )
-import           Cata                              ( RecTyped(..), unRecTyped )
 
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
-import           Data.List                         ( intercalate )
+import           Data.List                         ( intercalate, isSuffixOf )
 import qualified Data.Map                          as M
 
 -- This type used to be called `Expr` (see [this commit](1)), but was rewritten
@@ -76,6 +75,8 @@ data ExprF r
   | DefF String [(String, Ty.Ty)] (Maybe Ty.Ty) r
   | ModF String [r]
   deriving Functor
+
+type Expr = Fix ExprF
 
 itemName :: ExprF r -> Maybe String
 itemName = \case
@@ -126,40 +127,6 @@ pattern Ann expr ty = Fix (AnnF expr ty)
 pattern Def name params retTy body = Fix (DefF name params retTy body)
 pattern Mod name items = Fix (ModF name items)
 
--- | Represends a `do ... end` block.
---   The block:
---   ```
---   do
---     f[];
---     g[]
---   end
---   ```
---  translates to: `Semi g[] (Result g[])`.
---  The block:
---   ```
---   do
---     f[];
---     g[];
---   end
---   ```
---  translates to: `Semi g[] (Semi g[] Empty)`.
---  The block `do end` translates to: `Empty`.
-data Seq e         -- <sequence> -->
-  = Empty          --            | lookahead{END}
-  | Result e       --            | <expr>
-  | Semi e (Seq e) --            | <expr> SEMICOLON <sequence>
-  deriving Functor
-
-instance (IsEndTerminated e, Show e) => Show (Seq e)  where
-  show Empty = ""
-  show (Result e) = show e
-  show (Semi e Empty)
-    | isEndTerminated e = show e
-    | otherwise = show e ++ ";"
-  show (Semi e seq)
-    | isEndTerminated e = show e ++ "\n" ++ show seq
-    | otherwise = show e ++ ";\n" ++ show seq
-
 data BinOp
   = ArithOp ArithOp
   | BoolOp BoolOp
@@ -203,16 +170,49 @@ data UnaryOp
   | Neg
   deriving (Show)
 
-type Expr = Fix ExprF
+-- | Represends a `do ... end` block.
+--   The block:
+--   ```
+--   do
+--     f[];
+--     g[]
+--   end
+--   ```
+--  translates to: `Semi g[] (Result g[])`.
+--  The block:
+--   ```
+--   do
+--     f[];
+--     g[];
+--   end
+--   ```
+--  translates to: `Semi g[] (Semi g[] Empty)`.
+--  The block `do end` translates to: `Empty`.
+data Seq e         -- <sequence> -->
+  = Empty          --            | lookahead{END}
+  | Result e       --            | <expr> lookahead{END}
+  | Semi e (Seq e) --            | <expr> SEMICOLON <sequence>
+  deriving Functor
+
+instance (IsEndTerminated e, Show e) => Show (Seq e)  where
+  show = \case
+    Empty -> ""
+    Result e -> show e
+    Semi e Empty
+      | isEndTerminated e -> show e
+      | otherwise -> show e ++ ";"
+    Semi e seq
+      | isEndTerminated e -> show e ++ "\n" ++ show seq
+      | otherwise -> show e ++ ";\n" ++ show seq
 
 class IsEndTerminated a where
   isEndTerminated :: a -> Bool
 
 instance IsEndTerminated Expr where
-  isEndTerminated e = isEndTerminated $ unfix e
+  isEndTerminated e = isEndTerminated $ unwrap e
 
 instance IsEndTerminated TypedExpr where
-  isEndTerminated e = isEndTerminated $ unRecTyped e
+  isEndTerminated e = isEndTerminated $ unwrap e
 
 instance IsEndTerminated (ExprF f) where
   isEndTerminated (IfF _ _ _) = True

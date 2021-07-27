@@ -1,11 +1,9 @@
 module Cata
   ( Algebra
-  , Fix(..)
-  , unfix
+  , Unwrap(..)
   , cata
+  , Fix(..)
   , RecTyped(..)
-  , unRecTyped
-  , cataRecTyped
   )
 where
 
@@ -13,18 +11,20 @@ import qualified Ty
 
 type Algebra f a = f a -> a
 
+class Unwrap y where
+  unwrap :: y f -> f (y f)
+
+-- Type variable `y` is something like `Fix` or `RecTyped`.
+-- The argument `un` is something like `unfix` or `unRecTyped`.
+cata :: (Functor f, Unwrap y) => Algebra f a -> y f -> a
+cata alg = alg . fmap (cata alg) . unwrap
+
 data Fix f = Fix (f (Fix f))
 
-unfix :: Fix f -> f (Fix f)
-unfix (Fix f) = f
-
-cata :: Functor f => Algebra f a -> Fix f -> a
-cata alg = alg . fmap (cata alg) . unfix
+instance Unwrap Fix where
+  unwrap (Fix f) = f
 
 data RecTyped f = (f (RecTyped f)) :<: Ty.Ty
 
-unRecTyped :: RecTyped f -> f (RecTyped f)
-unRecTyped (f :<: _) = f
-
-cataRecTyped :: Functor f => Algebra f a -> RecTyped f -> a
-cataRecTyped alg = alg . fmap (cataRecTyped alg) . unRecTyped
+instance Unwrap RecTyped where
+  unwrap (f :<: _) = f

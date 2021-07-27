@@ -9,10 +9,10 @@ where
 import qualified Ast
 import qualified Hir
 import           Utils ( (+++), code )
-import           Cata  ( cataRecTyped, RecTyped(..) )
+import           Cata  ( cata, RecTyped(..) )
 
 eval :: Ast.TypedExpr -> Hir.Value
-eval = cataRecTyped $ \case
+eval = cata \case
 
   -- Literals are trivially comptime evaluable.
   Ast.LiteralF (Ast.Bool x)   -> Hir.VBool x
