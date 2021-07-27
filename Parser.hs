@@ -30,7 +30,7 @@ languageDef = emptyDef
   , Token.reservedNames   = [ "mod"
                             , "def"
                             , "let"
-                            , "static"
+                            , "const"
                             , "if"
                             , "then"
                             , "else"
@@ -162,8 +162,8 @@ letExpr = Ast.Let <$> (reserved "let" *> identifier) <*> (reservedOp "=" *> expr
 assignExpr :: Parser Ast.Expr
 assignExpr = Ast.Assign <$> identifier <*> (reservedOp "=" *> expression)
 
-staticExpr :: Parser Ast.Expr
-staticExpr = Ast.Static <$> (reserved "static" *> identifier) <*> (reservedOp "=" *> expression)
+letConstExpr :: Parser Ast.Expr
+letConstExpr = Ast.LetConst <$> (reserved "let" *> reserved "const" *> identifier) <*> (reservedOp "=" *> expression)
 
 returnExpr :: Parser Ast.Expr
 returnExpr = Ast.Ret <$> (reserved "ret" *> expression)
@@ -225,9 +225,9 @@ semiEndedTerm =  intrinsicExpr
              <|> parens expression
              <|> nopExpr
              <|> returnExpr
+             <|> try letConstExpr
              <|> letExpr
              <|> literalExpr
-             <|> staticExpr
              <|> try assignExpr
              <|> varExpr
 

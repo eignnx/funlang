@@ -17,7 +17,7 @@ module Ast
   , pattern Intrinsic
   , pattern Let
   , pattern Assign
-  , pattern Static
+  , pattern LetConst
   , pattern Ret
   , pattern If
   , pattern While
@@ -67,7 +67,7 @@ data ExprF r
   | IntrinsicF Parsec.SourcePos String [r]
   | LetF String r
   | AssignF String r
-  | StaticF String r
+  | LetConstF String r
   | RetF r
   | IfF r r r
   | WhileF r r
@@ -84,14 +84,14 @@ itemName :: ExprF r -> Maybe String
 itemName = \case
   DefF name _ _ _ -> Just name
   ModF name _     -> Just name
-  StaticF name _  -> Just name
+  LetConstF name _  -> Just name
   _               -> Nothing
 
 isModLevelItem :: ExprF r -> Bool
 isModLevelItem = \case
   DefF _ _ _ _ -> True
   ModF _ _     -> True
-  StaticF _ _  -> True
+  LetConstF _ _  -> True
   _            -> False
 
 modLevelItemTy :: TypedExpr -> Ty.Ty
@@ -108,7 +108,7 @@ modLevelItemTy = \case
       where getItemName (item :<: _) = maybe (error "") id $ itemName item
             pairs = zip (map getItemName items) (map modLevelItemTy items)
 
-  StaticF _ (exprF :<: ty) :<: _ ->
+  LetConstF _ (exprF :<: ty) :<: _ ->
     ty `Ty.addAttr` Ty.Fixed -- Just return the type of `e` in `static x = e`.
 
 pattern Var name = Fix (VarF name)
@@ -120,7 +120,7 @@ pattern Call f args = Fix (CallF f args)
 pattern Intrinsic pos name args = Fix (IntrinsicF pos name args)
 pattern Let name expr = Fix (LetF name expr)
 pattern Assign name expr = Fix (AssignF name expr)
-pattern Static name expr = Fix (StaticF name expr)
+pattern LetConst name expr = Fix (LetConstF name expr)
 pattern Ret x = Fix (RetF x)
 pattern If cond yes no = Fix (IfF cond yes no)
 pattern While cond body = Fix (WhileF cond body)
@@ -258,7 +258,7 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (IntrinsicF pos name args) = "intr." ++ name ++ show args
   show (LetF name e) = "let" +++ name +++ "=" +++ show e
   show (AssignF name e) = name +++ "=" +++ show e
-  show (StaticF name e) = "static" +++ name +++ "=" +++ show e
+  show (LetConstF name e) = "let const" +++ name +++ "=" +++ show e
   show (RetF e) = "ret" +++ show e
   show (IfF cond yes no) = "if" +++ show cond +++ "then" ++ indent (show yes) ++ "\nelse" ++ indent (show no) ++ "\nend"
   show (WhileF cond body) = "while" +++ show cond +++ show body

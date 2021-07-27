@@ -3,8 +3,8 @@ mod Foo
     x + 1
   end
 
-  static MyFavNum = 7 + -49 * 3 / if true then 2 else 3 end
-  static MySecondFavNum = MyFavNum + 100
+  let const MyFavNum = 7 + -49 * 3 / if true then 2 else 3 end
+  let const MySecondFavNum = MyFavNum + 100
 end
 
 def main[] do
