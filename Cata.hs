@@ -3,9 +3,13 @@ module Cata
   , Fix(..)
   , unfix
   , cata
-  , andThen
+  , RecTyped(..)
+  , unRecTyped
+  , cataRecTyped
   )
 where
+
+import qualified Ty
 
 type Algebra f a = f a -> a
 
@@ -17,5 +21,10 @@ unfix (Fix f) = f
 cata :: Functor f => Algebra f a -> Fix f -> a
 cata alg = alg . fmap (cata alg) . unfix
 
-andThen :: Algebra f (Fix f) -> Algebra f (Fix f) -> Algebra f (Fix f)
-f `andThen` g = g . unfix . f
+data RecTyped f = (f (RecTyped f)) :<: Ty.Ty
+
+unRecTyped :: RecTyped f -> f (RecTyped f)
+unRecTyped (f :<: _) = f
+
+cataRecTyped :: Functor f => Algebra f a -> RecTyped f -> a
+cataRecTyped alg = alg . fmap (cataRecTyped alg) . unRecTyped

@@ -15,9 +15,10 @@ module TyCheck
 where
 
 import qualified Ast
-import           Ast           ( Typed(HasTy), RecTyped(..) )
+import           Ast           ( Typed(HasTy) )
 import           Ty            ( Ty(..), (<:), (-&&>), (>||<), downcastToFnTy, addAttr, isFixed )
 import           Utils         ( (+++), code, codeIdent, indent )
+import           Cata          ( RecTyped(..) )
 import qualified Intr
 import qualified Data.Map      as M
 import           Control.Monad ( foldM )

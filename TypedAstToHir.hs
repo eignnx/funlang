@@ -11,8 +11,9 @@ where
 import qualified Ty
 import           Ty                           ( (<:) )
 import qualified Ast
-import           Ast                          ( Typed(..), RecTyped(..) )
+import           Ast                          ( Typed(..) )
 import qualified Hir
+import           Cata                         ( RecTyped(..) )
 import qualified Comptime
 import qualified Intr
 

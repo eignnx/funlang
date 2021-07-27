@@ -4,6 +4,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveFunctor #-}
 
 module Ast
   ( ExprF(..)
@@ -38,7 +39,6 @@ module Ast
   , Expr
   , isEndTerminated
   , Typed(..)
-  , RecTyped(..)
   , TypedExpr
   )
 where
@@ -46,6 +46,8 @@ where
 import qualified Ty
 import           Cata                              ( Fix(..), unfix )
 import           Utils                             ( (+++), code, indent )
+import           Cata                              ( RecTyped(..), unRecTyped )
+
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
 import           Data.List                         ( intercalate )
 import qualified Data.Map                          as M
@@ -73,6 +75,7 @@ data ExprF r
   | AnnF r Ty.Ty
   | DefF String [(String, Ty.Ty)] (Maybe Ty.Ty) r
   | ModF String [r]
+  deriving Functor
 
 itemName :: ExprF r -> Maybe String
 itemName = \case
@@ -145,6 +148,7 @@ data Seq e         -- <sequence> -->
   = Empty          --            | lookahead{END}
   | Result e       --            | <expr>
   | Semi e (Seq e) --            | <expr> SEMICOLON <sequence>
+  deriving Functor
 
 instance (IsEndTerminated e, Show e) => Show (Seq e)  where
   show Empty = ""
@@ -218,10 +222,6 @@ instance IsEndTerminated (ExprF f) where
   isEndTerminated _ = False
 
 data Typed a = a `HasTy` Ty.Ty
-data RecTyped f = (f (RecTyped f)) :<: Ty.Ty
-
-unRecTyped :: RecTyped f -> f (RecTyped f)
-unRecTyped (f :<: _) = f
 
 type TypedExpr = RecTyped ExprF
 

@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE BlockArguments #-}
 
 module Comptime
   ( eval
@@ -6,26 +7,27 @@ module Comptime
 where
 
 import qualified Ast
-import           Ast ( RecTyped((:<:)) )
 import qualified Hir
+import           Utils ( (+++), code )
+import           Cata  ( cataRecTyped, RecTyped(..) )
 
 eval :: Ast.TypedExpr -> Hir.Value
-eval = \case
+eval = cataRecTyped $ \case
 
   -- Literals are trivially comptime evaluable.
-  Ast.LiteralF (Ast.Bool x) :<: _   -> Hir.VBool x
-  Ast.LiteralF (Ast.Int x) :<: _    -> Hir.VInt $ fromIntegral x
-  Ast.LiteralF (Ast.String x) :<: _ -> Hir.VString x
+  Ast.LiteralF (Ast.Bool x)   -> Hir.VBool x
+  Ast.LiteralF (Ast.Int x)    -> Hir.VInt $ fromIntegral x
+  Ast.LiteralF (Ast.String x) -> Hir.VString x
 
-  Ast.UnaryF Ast.Not e :<: _ -> let
-    Hir.VBool x = eval e
+  Ast.UnaryF Ast.Not e -> let
+    Hir.VBool x = e
     in Hir.VBool $ not x
 
-  Ast.UnaryF Ast.Neg e :<: _ -> let
-    Hir.VInt x = eval e
+  Ast.UnaryF Ast.Neg e -> let
+    Hir.VInt x = e
     in Hir.VInt $ negate x
 
-  Ast.BinaryF op x y :<: _ -> case op of
+  Ast.BinaryF op x y -> case op of
     Ast.ArithOp Ast.Add    -> evalIntIntBinOp (+) x y
     Ast.ArithOp Ast.Sub    -> evalIntIntBinOp (-) x y
     Ast.ArithOp Ast.Mul    -> evalIntIntBinOp (*) x y
@@ -42,36 +44,33 @@ eval = \case
   -- Ast.IfF r r r
   -- Ast.AnnF r Ty.Ty
 
-  other -> error $ "I don't yet know how to evaluate `" ++ show other ++ "` at compile time. Sorry!"
+  other -> error $ "I don't yet know how to evaluate something at compile time. Sorry!"
 
-evalIntIntBinOp :: (Int -> Int -> Int) -> Ast.TypedExpr -> Ast.TypedExpr -> Hir.Value
+evalIntIntBinOp :: (Int -> Int -> Int) -> Hir.Value -> Hir.Value -> Hir.Value
 evalIntIntBinOp op x y = let
-  Hir.VInt x' = eval x
-  Hir.VInt y' = eval y
+  Hir.VInt x' = x
+  Hir.VInt y' = y
   in Hir.VInt $ x' `op` y'
 
-evalIntBoolBinOp :: (Int -> Int -> Bool) -> Ast.TypedExpr -> Ast.TypedExpr -> Hir.Value
+evalIntBoolBinOp :: (Int -> Int -> Bool) -> Hir.Value -> Hir.Value -> Hir.Value
 evalIntBoolBinOp op x y = let
-  Hir.VInt x' = eval x
-  Hir.VInt y' = eval y
+  Hir.VInt x' = x
+  Hir.VInt y' = y
   in Hir.VBool $ x' `op` y'
 
-evalBoolBoolBinOp :: (Bool -> Bool -> Bool) -> Ast.TypedExpr -> Ast.TypedExpr -> Hir.Value
+evalBoolBoolBinOp :: (Bool -> Bool -> Bool) -> Hir.Value -> Hir.Value -> Hir.Value
 evalBoolBoolBinOp op x y = let
-  Hir.VBool x' = eval x
-  Hir.VBool y' = eval y
+  Hir.VBool x' = x
+  Hir.VBool y' = y
   in Hir.VBool $ x' `op` y'
 
 xor a b = a || b && (not $ a && b)
 
-evalValueBoolBinOp :: (Hir.Value -> Hir.Value -> Bool) -> Ast.TypedExpr -> Ast.TypedExpr -> Hir.Value
-evalValueBoolBinOp op x y = let
-  x' = eval x
-  y' = eval y
-  in Hir.VBool $ x' `op` y'
+evalValueBoolBinOp :: (Hir.Value -> Hir.Value -> Bool) -> Hir.Value -> Hir.Value -> Hir.Value
+evalValueBoolBinOp op x y = Hir.VBool $ x `op` y
 
-evalTextTextBinOp :: (String -> String -> String) -> Ast.TypedExpr -> Ast.TypedExpr -> Hir.Value
+evalTextTextBinOp :: (String -> String -> String) -> Hir.Value -> Hir.Value -> Hir.Value
 evalTextTextBinOp op x y = let
-  Hir.VString x' = eval x
-  Hir.VString y' = eval y
+  Hir.VString x' = x
+  Hir.VString y' = y
   in Hir.VString $ x' `op` y'
