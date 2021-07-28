@@ -3,11 +3,13 @@ module Cata
   , Unwrap(..)
   , cata
   , Fix(..)
+  , At(..)
   , RecTyped(..)
   )
 where
 
 import qualified Ty
+import Utils ( Span(..) )
 
 type Algebra f a = f a -> a
 
@@ -23,6 +25,11 @@ data Fix f = Fix (f (Fix f))
 
 instance Unwrap Fix where
   unwrap (Fix f) = f
+
+data At f = (f (At f)) :@: Span
+
+instance Unwrap At where
+  unwrap (f :@: _) = f
 
 data RecTyped f = (f (RecTyped f)) :<: Ty.Ty
 

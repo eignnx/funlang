@@ -18,7 +18,7 @@ import qualified Ast
 import           Ast           ( Typed(HasTy) )
 import           Ty            ( Ty(..), (<:), (-&&>), (>||<), downcastToFnTy, addAttr, isFixed )
 import           Utils         ( (+++), code, codeIdent, indent )
-import           Cata          ( RecTyped(..) )
+import           Cata          ( RecTyped(..), At(..) )
 import qualified Intr
 import qualified Data.Map      as M
 import           Control.Monad ( foldM )
@@ -207,15 +207,16 @@ instance CheckType Ast.Expr where
 
   type Checked Ast.Expr = Ast.TypedExpr
 
-  infer (Ast.Var name) = do
+  infer (Ast.VarF name :@: loc) = do
     tyRes <- varLookup name
     case tyRes of
       Ok ty -> do
         let var = Ast.VarF name
         return $ Ok (var :<: ty)
-      Err err -> return $ Err err
+      Err err -> return $ Err err `addError` msg
+        where msg = "I can't type check the variable at" +++ show loc
 
-  infer (Ast.Literal x) = do
+  infer (Ast.LiteralF x :@: loc) = do
     let lit = Ast.LiteralF x
     return $ case x of
       Ast.Unit     -> Ok (lit :<: VoidTy)
@@ -223,24 +224,25 @@ instance CheckType Ast.Expr where
       Ast.Int _    -> Ok (lit :<: (IntTy  `addAttr` Ty.Fixed))
       Ast.String _ -> Ok (lit :<: (TextTy `addAttr` Ty.Fixed))
 
-  infer (Ast.Unary op@Ast.Not expr) = inferUnaryOp op BoolTy BoolTy expr
-  infer (Ast.Unary op@Ast.Neg expr) = inferUnaryOp op IntTy IntTy expr
+  infer (Ast.UnaryF op@Ast.Not expr :@: loc) = inferUnaryOp op BoolTy BoolTy expr
+  infer (Ast.UnaryF op@Ast.Neg expr :@: loc) = inferUnaryOp op IntTy IntTy expr
 
-  infer (Ast.Binary op@(Ast.ArithOp _) e1 e2)          = inferBinOp op IntTy IntTy e1 e2
-  infer (Ast.Binary op@(Ast.BoolOp _) e1 e2)           = inferBinOp op BoolTy BoolTy e1 e2
-  infer (Ast.Binary op@(Ast.RelOp Ast.Eq) e1 e2)       = return $ Err $ RootCause msg
+  infer (Ast.BinaryF op@(Ast.ArithOp _) e1 e2 :@: loc)          = inferBinOp op IntTy IntTy e1 e2
+  infer (Ast.BinaryF op@(Ast.BoolOp  _) e1 e2 :@: loc)          = inferBinOp op BoolTy BoolTy e1 e2
+  infer (Ast.BinaryF op@(Ast.RelOp Ast.Eq) e1 e2 :@: loc)       = return $ Err $ RootCause msg
     where msg = "I don't know how to infer the type of the `==` operator just yet. It's trickier than you'd think"
-  infer (Ast.Binary op@(Ast.RelOp Ast.Neq) e1 e2)       = return $ Err $ RootCause msg
+  infer (Ast.BinaryF op@(Ast.RelOp Ast.Neq) e1 e2 :@: loc)      = return $ Err $ RootCause msg
     where msg = "I don't know how to infer the type of the `!=` operator just yet. It's trickier than you'd think"
-  infer (Ast.Binary op@(Ast.RelOp _) e1 e2)            = inferBinOp op IntTy BoolTy e1 e2
-  infer (Ast.Binary op@(Ast.OtherOp Ast.Concat) e1 e2) = inferBinOp op TextTy TextTy e1 e2
+  infer (Ast.BinaryF op@(Ast.RelOp _) e1 e2 :@: loc)            = inferBinOp op IntTy BoolTy e1 e2
+  infer (Ast.BinaryF op@(Ast.OtherOp Ast.Concat) e1 e2 :@: loc) = inferBinOp op TextTy TextTy e1 e2
 
   -- This `infer` impl simply defers to `instance CheckType (Ast.Seq Ast.Expr)`.
-  infer (Ast.Block seq) = do
+  infer (Ast.BlockF seq :@: loc) = do
     seqRes <- infer seq
     case seqRes of
       Ok (seq', ty) -> return $ Ok $ Ast.BlockF seq' :<: ty
-      Err err -> return $ Err err
+      Err err -> return $ Err err `addError` msg
+        where msg = "I can't type check the block at" +++ show loc
 
   -- The runtime imposes the following order on the execution of a `Call`
   -- expression:
@@ -253,7 +255,7 @@ instance CheckType Ast.Expr where
   --
   -- HOWEVER: While type-checking, we must FIRST infer the type of `f`, THEN
   -- check that the inferred types of the arguments match `f`'s parameter types.
-  infer (Ast.Call fn args) = do
+  infer (Ast.CallF fn args :@: loc) = do
     fnRes <- infer fn
     case fnRes of
       Ok fn'@(_ :<: fnTy) | isJust (downcastToFnTy fnTy) -> do
@@ -264,7 +266,8 @@ instance CheckType Ast.Expr where
             let call = Ast.CallF fn' args'
             let argsExeTy = foldr (-&&>) VoidTy (map (\(_ :<: ty) -> ty) args')
             return $ Ok (call :<: (argsExeTy -&&> retTy))
-          Err err -> return $ Err err
+          Err err -> return $ Err err `addError` msg
+            where msg = "I can't type check the function call at" +++ show loc
       Ok fn'@(_ :<: NeverTy) -> do
         -- Oops! Well, let's make the best of it. Try inferring args.
         argsRes <- sequenceA <$> mapM infer args
@@ -284,20 +287,20 @@ instance CheckType Ast.Expr where
                 expected = length argTys
                 received = length args
 
-  infer expr@(Ast.Intrinsic loc name args) = do
+  infer expr@(Ast.IntrinsicF place name args :@: loc) = do
     argsRes <- sequenceA <$> mapM infer args
     case argsRes of
       Ok args' -> do
-        intrRes <- infer (Intr.fromName name loc, args')
+        intrRes <- infer (Intr.fromName name place, args')
         case intrRes of
           Ok (_ `HasTy` ty) -> do
-            let intr = Ast.IntrinsicF loc name args'
+            let intr = Ast.IntrinsicF place name args'
             return $ Ok (intr :<: ty)
           Err err -> return $ Err err `addError` msg
             where msg = "The intrinsic call" +++ code expr +++ "has a problem"
       Err err -> return $ Err err
 
-  infer (Ast.Let name expr) = do
+  infer (Ast.LetF name expr :@: loc) = do
     exprRes <- infer expr
     case exprRes of
       Ok expr'@(_ :<: exprTy) -> do
@@ -307,7 +310,7 @@ instance CheckType Ast.Expr where
       err -> return $ err `addError` msg
         where msg = "The declaration of" +++ codeIdent name +++ "doesn't type check"
 
-  infer (Ast.Assign name expr) = do
+  infer (Ast.AssignF name expr :@: loc) = do
     varRes <- varLookup name
     case varRes of
       Ok varTy -> do
@@ -321,7 +324,7 @@ instance CheckType Ast.Expr where
       Err err -> return $ Err err `addError` msg
         where msg = "I can't assign to the undeclared variable" +++ codeIdent name
 
-  infer (Ast.LetConst name expr) = do
+  infer (Ast.LetConstF name expr :@: loc) = do
     exprRes <- infer expr
     case exprRes of
       Ok expr'@(_ :<: exprTy)
@@ -334,7 +337,7 @@ instance CheckType Ast.Expr where
       err -> return $ err `addError` msg
         where msg = "The declaration of" +++ codeIdent name +++ "doesn't type check"
 
-  infer (Ast.Ret expr) = do
+  infer (Ast.RetF expr :@: loc) = do
     fnRetTy <- getFnRetTy
     exprRes <- check expr fnRetTy
     case exprRes of
@@ -357,7 +360,7 @@ instance CheckType Ast.Expr where
   --   2. CHECK that the whole if expr has that type.
   -- NOTE #1: We only need to be able to INFER one (1) of the branches.
   -- NOTE #2: The traslation to Ast.TypedExpr will be done by `check`.
-  infer (Ast.If cond yes no) = do
+  infer (Ast.IfF cond yes no :@: loc) = do
     condRes <- check cond BoolTy
     bodyRes <- checkSameType yes no
     case (condRes, bodyRes) of
@@ -374,7 +377,7 @@ instance CheckType Ast.Expr where
   -- A while expression does NOT return the never type. This is because
   -- usually, it does not infinitely loop. It usually loops until the
   -- condition is no longer true, then ends, yielding void.
-  infer (Ast.While cond body) = do
+  infer (Ast.WhileF cond body :@: loc) = do
     condRes <- check cond BoolTy
     bodyRes <- check body VoidTy -- Body ought to have type Void.
     case (condRes, bodyRes) of
@@ -386,7 +389,7 @@ instance CheckType Ast.Expr where
           where msg1 = "The condition of this `while` loop doesn't have type" +++ code BoolTy
                 msg2 = "The body of a this `while` loop doesn't have type" +++ code VoidTy
 
-  infer (Ast.Loop body) = do
+  infer (Ast.LoopF body :@: loc) = do
     bodyRes <- check body VoidTy -- Body ought to have type Void.y
     case bodyRes of
         Ok body' -> do
@@ -395,16 +398,16 @@ instance CheckType Ast.Expr where
         err -> return $ err `addError` msg
           where msg = "I couldn't infer the type of the `loop` expression"
 
-  infer Ast.Nop = return $ Ok (Ast.NopF :<: VoidTy)
+  infer (Ast.NopF :@: loc) = return $ Ok (Ast.NopF :<: VoidTy)
 
-  infer (Ast.Ann expr ty) = do
+  infer (Ast.AnnF expr ty :@: loc) = do
     res <- check expr ty
     let rebuild expr' = (Ast.AnnF expr' ty :<: ty)
     return $ (rebuild <$> res) `addError` msg
       where msg = "The expression" +++ code expr +++ "does not have type" +++ code ty
 
   -- For when the return type IS specified.
-  infer (Ast.Def name params (Just retTy) body) = do
+  infer (Ast.DefF name params (Just retTy) body :@: loc) = do
     setFnRetTy retTy -- Set fn's return type.
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
@@ -419,7 +422,7 @@ instance CheckType Ast.Expr where
       Err err -> return $ Err err
 
   -- For when the return type is NOT specified.
-  infer (Ast.Def name params Nothing body) = do
+  infer (Ast.DefF name params Nothing body :@: loc) = do
     setFnRetTy NeverTy -- We don't know the fn's return type yet! FIXME: seems bad...
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
@@ -433,7 +436,7 @@ instance CheckType Ast.Expr where
         return $ Ok (def :<: VoidTy)
       Err err -> return $ Err err
 
-  infer (Ast.Mod name items) = do
+  infer (Ast.ModF name items :@: loc) = do
     res <- skimItemDefs -- First, we need to put all top-level definitions into the Ctx.
     case res of
       Err err -> return $ Err err `addError` ("I got stuck while skimming the contents of module" +++ codeIdent name)
@@ -451,30 +454,30 @@ instance CheckType Ast.Expr where
       skimItemDefs :: TyChecker (Res ())
       skimItemDefs =
         mconcat <$> (forM items $ \case
-          Ast.Def name params (Just retTy) _ -> do
+          Ast.DefF name params (Just retTy) _ :@: loc -> do
             define name $ Fixed $ FnTy (map snd params) retTy `addAttr` Fixed
             return $ Ok ()
-          Ast.Def name params Nothing _ -> do
+          Ast.DefF name params Nothing _ :@: loc -> do
             -- Since we don't know the return type, we have to stub for now.
             define name $ Fixed $ FnTy (map snd params) NeverTy `addAttr` Fixed -- FIXME: see ./ex/rec-problem.rb
             return $ Ok ()
-          Ast.Mod name _ -> do
+          Ast.ModF name _ :@: loc -> do
             define name $ ModTy M.empty `addAttr` Fixed
             return $ Ok ()
-          Ast.LetConst name _ -> do
+          Ast.LetConstF name _ :@: loc -> do
             define name $ NeverTy `addAttr` Fixed
             return $ Ok ()
           other -> return $ Err $ RootCause msg
             where msg = "I can't let you put the expression" +++ code other +++ "at the top-level of a module.")
 
-  -- Default case.
-  infer expr = return $ Err $ RootCause $ msg
-    where msg = "I don't have enough information to infer the type of" +++ code expr
+  -- -- Default case.
+  -- infer expr = return $ Err $ RootCause $ msg
+  --   where msg = "I don't have enough information to infer the type of" +++ code expr
 
   check :: Ast.Expr -> Ty -> TyChecker (Res Ast.TypedExpr)
 
   -- Check an equality/disequality expression: `e1 == e2` or `e1 != e2`
-  check (Ast.Binary (Ast.RelOp op) e1 e2) ty
+  check (Ast.BinaryF (Ast.RelOp op) e1 e2 :@: loc) ty
     | ty <: BoolTy && op `elem` [Ast.Eq, Ast.Neq] = do
       res <- checkSameType e1 e2
       case res of
@@ -491,7 +494,7 @@ instance CheckType Ast.Expr where
   --  1. The conditional expression, and
   --  2. (One of) the branches.
   -- Therefore, the type of an `if` expression ought to be `condTy -&&> branchTy`.
-  check (Ast.If cond yes no) ty = do
+  check (Ast.IfF cond yes no :@: loc) ty = do
     condRes <- check cond BoolTy
     yesRes <- check yes ty
     noRes <- check no ty
@@ -517,7 +520,7 @@ instance CheckType Ast.Expr where
 --   --        err -> err `addError` ("The variable `" ++ var ++ "` is declared as a `" ++ show varTy ++ "`, but is bound to `" ++ show binding ++ "`. This is a problem")
 --   --   -- check ctx (App (FnExpr var body) binding) ty
 
-  check (Ast.Let name expr) ty =
+  check (Ast.LetF name expr :@: loc) ty =
     if ty <: VoidTy then do
       res <- infer expr
       case res of
@@ -530,7 +533,7 @@ instance CheckType Ast.Expr where
     else
       return $ Err $ RootCause ("A let declaration has type" +++ code VoidTy)
 
-  check (Ast.Assign name expr) ty = do
+  check (Ast.AssignF name expr :@: loc) ty = do
     if ty == VoidTy then do
       nameRes <- varLookup name
       case nameRes of
@@ -544,7 +547,7 @@ instance CheckType Ast.Expr where
     else
       return $ Err $ RootCause ("Assignments have type" +++ code VoidTy)
 
-  check (Ast.LetConst name expr) ty =
+  check (Ast.LetConstF name expr :@: loc) ty =
     if ty <: VoidTy then do
       res <- infer expr
       case res of
@@ -558,7 +561,7 @@ instance CheckType Ast.Expr where
       return $ Err $ RootCause ("A `let const` declaration has type" +++ code VoidTy)
 
   -- For when the return type IS specified.
-  check (Ast.Def name params (Just retTy) body) expected | expected <: VoidTy = do
+  check (Ast.DefF name params (Just retTy) body :@: loc) expected | expected <: VoidTy = do
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
       define param paramTy
@@ -573,7 +576,7 @@ instance CheckType Ast.Expr where
         where msg = "The function" +++ codeIdent name +++ "does not match expected type" +++ code expected
 
   -- For when the return type is NOT specified.
-  check (Ast.Def name params Nothing body) expected | expected <: VoidTy = do
+  check (Ast.DefF name params Nothing body :@: loc) expected | expected <: VoidTy = do
     st <- get -- Save current ctx
     paramTys <- forM params $ \(param, paramTy) -> do
       define param paramTy
@@ -587,7 +590,7 @@ instance CheckType Ast.Expr where
       Err err -> return $ (Err err) `addError` msg
         where msg = "The function" +++ codeIdent name +++ "does not match expected type" +++ code expected
 
-  check (Ast.Mod name items) expected | expected <: VoidTy = do
+  check (Ast.ModF name items :@: loc) expected | expected <: VoidTy = do
     itemsRes <- sequenceA <$> mapM infer items
     case itemsRes of
       Ok items' -> do

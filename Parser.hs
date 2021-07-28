@@ -9,6 +9,8 @@ where
 
 import qualified Ast                  as Ast
 import qualified Ty                   as Ty
+import           Utils                ( Span(..), mkSpan )
+import           Cata                 ( At(..) )
 import           Control.Monad
 import           System.IO
 import           Text.Parsec
@@ -19,6 +21,7 @@ import qualified Text.Parsec.Token    as Token
 import           Debug.Trace          ( trace )
 import qualified Data.Char            as Char
 import           System.FilePath      ( takeBaseName )
+import qualified Data.Functor.Identity
 
 languageDef = emptyDef
   { Token.commentStart    = "{#"
@@ -91,17 +94,17 @@ langParser = innerMod
 -- Parses a file into a module. Definitions can be placed directly without
 -- declaring the module with the `mod` keyword.
 innerMod :: Parser Ast.Expr
-innerMod = do
+innerMod = spanned do
   items <- whiteSpace >> many expression
-  return $ Ast.Mod "#file" items
+  return $ Ast.ModF "#file" items
 
 modExpr :: Parser Ast.Expr
-modExpr = do
+modExpr = spanned do
   reserved "mod"
   name <- identifier
   items <- whiteSpace >> many expression
   reserved "end"
-  return $ Ast.Mod name items
+  return $ Ast.ModF name items
 
 -- ```
 -- def my-fn[arg1, arg2, ...] do
@@ -113,24 +116,24 @@ modExpr = do
 -- def my-fn[arg1, arg2, ...] = ...expr...
 -- ```
 defExpr :: Parser Ast.Expr
-defExpr = do
+defExpr = spanned do
   reserved "def"
   name       <- identifier
   let param  =  (,) <$> identifier <*> (colon *> ty)
   params     <- brackets $ sepEndBy param (symbol ",")
   let exprTail = (do reservedOp "="
                      body <- expression
-                     return $ Ast.Def name params Nothing body)
+                     return $ Ast.DefF name params Nothing body)
   let blockTail = (do retTy <- option Ty.VoidTy (reservedOp "->" *> ty) -- Without a ret ty, def defaults to returning Unit.
                       body  <- blockExpr
-                      return $ Ast.Def name params (Just retTy) body)
+                      return $ Ast.DefF name params (Just retTy) body)
   exprTail <|> blockTail
 
 ty :: Parser Ty.Ty
 ty = Ty.ValTy <$> identifier
 
 ifExpr :: Parser Ast.Expr
-ifExpr = do
+ifExpr = spanned do
   reserved "if"
   cond <- expression
   reserved "then"
@@ -138,55 +141,68 @@ ifExpr = do
   reserved "else"
   noBody <- expression
   reserved "end"
-  return $ Ast.If cond yesBody noBody
+  return $ Ast.IfF cond yesBody noBody
 
 whileExpr :: Parser Ast.Expr
-whileExpr = do
+whileExpr = spanned do
   reserved "while"
   cond <- expression
   body <- expression
-  return $ Ast.While cond body
+  return $ Ast.WhileF cond body
 
 loopExpr :: Parser Ast.Expr
-loopExpr = do
+loopExpr = spanned do
   reserved "loop"
   body <- expression
-  return $ Ast.Loop body
+  return $ Ast.LoopF body
 
 nopExpr :: Parser Ast.Expr
-nopExpr = reserved "nop" *> return Ast.Nop
+nopExpr = spanned $ reserved "nop" *> return Ast.NopF
 
 letExpr :: Parser Ast.Expr
-letExpr = Ast.Let <$> (reserved "let" *> identifier) <*> (reservedOp "=" *> expression)
+letExpr = spanned $ Ast.LetF <$> (reserved "let" *> identifier) <*> (reservedOp "=" *> expression)
 
 assignExpr :: Parser Ast.Expr
-assignExpr = Ast.Assign <$> identifier <*> (reservedOp "=" *> expression)
+assignExpr = spanned $ Ast.AssignF <$> identifier <*> (reservedOp "=" *> expression)
 
 letConstExpr :: Parser Ast.Expr
-letConstExpr = Ast.LetConst <$> (reserved "let" *> reserved "const" *> identifier) <*> (reservedOp "=" *> expression)
+letConstExpr = spanned $ Ast.LetConstF <$> (reserved "let" *> reserved "const" *> identifier) <*> (reservedOp "=" *> expression)
 
 returnExpr :: Parser Ast.Expr
-returnExpr = Ast.Ret <$> (reserved "ret" *> expression)
+returnExpr = spanned $ Ast.RetF <$> (reserved "ret" *> expression)
 
+unaryOp op f = do
+  start <- getPosition
+  op
+  end <- getPosition
+  return $ \x -> f x :@: mkSpan start end
+
+binaryOp op f = do
+  start <- getPosition
+  op
+  end <- getPosition
+  return $ \x y -> f x y :@: mkSpan start end
+
+operators :: [[Operator String () Data.Functor.Identity.Identity Ast.Expr]]
 operators =
-  [ [ Prefix (reservedOp "-" >> return (Ast.Unary Ast.Neg))
-    , Prefix (reserved "not" >> return (Ast.Unary Ast.Not))
+  [ [ Prefix (unaryOp (reservedOp "-") (Ast.UnaryF Ast.Neg)) 
+    , Prefix (unaryOp (reserved "not") (Ast.UnaryF Ast.Not))
     ]
-  , [ Infix (reservedOp "*" >> return (Ast.Binary (Ast.ArithOp Ast.Mul))) AssocLeft
-    , Infix (reservedOp "/" >> return (Ast.Binary (Ast.ArithOp Ast.Div))) AssocLeft
+  , [ Infix (binaryOp (reservedOp "*") (Ast.BinaryF (Ast.ArithOp Ast.Mul))) AssocLeft
+    , Infix (binaryOp (reservedOp "/") (Ast.BinaryF (Ast.ArithOp Ast.Div))) AssocLeft
     ]
-  , [ Infix (reservedOp "+" >> return (Ast.Binary (Ast.ArithOp Ast.Add))) AssocLeft
-    , Infix (reservedOp "-" >> return (Ast.Binary (Ast.ArithOp Ast.Sub))) AssocLeft
-    , Infix (reservedOp "++" >> return (Ast.Binary (Ast.OtherOp Ast.Concat))) AssocLeft
+  , [ Infix (binaryOp (reservedOp "+")  (Ast.BinaryF (Ast.ArithOp Ast.Add)))    AssocLeft
+    , Infix (binaryOp (reservedOp "-")  (Ast.BinaryF (Ast.ArithOp Ast.Sub)))    AssocLeft
+    , Infix (binaryOp (reservedOp "++") (Ast.BinaryF (Ast.OtherOp Ast.Concat))) AssocLeft
     ]
-  , [ Infix (reservedOp ">" >> return (Ast.Binary (Ast.RelOp Ast.Gt)))   AssocLeft
-    , Infix (reservedOp "<" >> return (Ast.Binary (Ast.RelOp Ast.Lt)))   AssocLeft
-    , Infix (reservedOp "==" >> return (Ast.Binary (Ast.RelOp Ast.Eq)))  AssocLeft
-    , Infix (reservedOp "!=" >> return (Ast.Binary (Ast.RelOp Ast.Neq))) AssocLeft
+  , [ Infix (binaryOp (reservedOp ">")  (Ast.BinaryF (Ast.RelOp Ast.Gt)))  AssocLeft
+    , Infix (binaryOp (reservedOp "<")  (Ast.BinaryF (Ast.RelOp Ast.Lt)))  AssocLeft
+    , Infix (binaryOp (reservedOp "==") (Ast.BinaryF (Ast.RelOp Ast.Eq)))  AssocLeft
+    , Infix (binaryOp (reservedOp "!=") (Ast.BinaryF (Ast.RelOp Ast.Neq))) AssocLeft
     ]
-  , [ Infix (reserved "and" >> return (Ast.Binary (Ast.BoolOp Ast.And))) AssocLeft
-    , Infix (reserved "or" >> return (Ast.Binary (Ast.BoolOp Ast.Or)))   AssocLeft
-    , Infix (reserved "xor" >> return (Ast.Binary (Ast.BoolOp Ast.Xor))) AssocLeft
+  , [ Infix (binaryOp (reserved "and") (Ast.BinaryF (Ast.BoolOp Ast.And))) AssocLeft
+    , Infix (binaryOp (reserved "or")  (Ast.BinaryF (Ast.BoolOp Ast.Or)))  AssocLeft
+    , Infix (binaryOp (reserved "xor") (Ast.BinaryF (Ast.BoolOp Ast.Xor))) AssocLeft
     ]
   ]
 
@@ -201,22 +217,28 @@ term =  try nestedCalls
 -- my-func[x, y][1, 2][a, b, c]
 nestedCalls :: Parser Ast.Expr
 nestedCalls = do
+  start <- getPosition
   head <- termFirst
-  allArgs <- many1 arguments
-  return $ foldl Ast.Call head allArgs -- Build up all the calls
+  allArgs <- many1 ((,) <$> arguments <*> getPosition)
+  return $ foldl (reducer start) head allArgs -- Build up all the calls
+  where
+    reducer start expr (arg, end) = Ast.CallF expr arg :@: mkSpan start end
 
 -- 1 : Never : Nat : Int
 nestedAnn :: Parser Ast.Expr
 nestedAnn = do
+  start <- getPosition
   head <- termFirst
-  allTys <- many1 (colon *> ty)
-  return $ foldl Ast.Ann head allTys -- Build up all the calls
+  allTys <- many1 ((,) <$> (colon *> ty) <*> getPosition)
+  return $ foldl (reducer start) head allTys -- Build up all the calls
+  where
+    reducer start expr (ty, end) = Ast.AnnF expr ty :@: mkSpan start end
 
 varExpr :: Parser Ast.Expr
-varExpr = Ast.Var <$> identifier
+varExpr = spanned $ Ast.VarF <$> identifier
 
 literalExpr :: Parser Ast.Expr
-literalExpr = Ast.Literal <$> literal
+literalExpr = spanned $ Ast.LiteralF <$> literal
 
 termFirst :: Parser Ast.Expr
 termFirst =  semiEndedTerm <|> endEndedTerm
@@ -248,16 +270,16 @@ terminatedExpr :: Parser Ast.Expr
 terminatedExpr = try (expression <* semi) <|> endEndedExpr
 
 intrinsicExpr :: Parser Ast.Expr
-intrinsicExpr = do
+intrinsicExpr = spanned do
   pos <- getPosition
   reserved "intr"
   dot
   name <- identifier
   args <- arguments
-  return $ Ast.Intrinsic pos name args
+  return $ Ast.IntrinsicF pos name args
 
 callExpr :: Parser Ast.Expr
-callExpr = Ast.Call <$> expression <*> arguments
+callExpr = spanned $ Ast.CallF <$> expression <*> arguments
 
 arguments :: Parser [Ast.Expr]
 arguments = brackets $ sepEndBy expression comma
@@ -281,30 +303,37 @@ seqTerminatedBy end
   <|> (lookAhead end *> return Ast.Empty)
 
 blockExpr :: Parser Ast.Expr
-blockExpr = do
+blockExpr = spanned do
   reserved "do"
   seq <- seqTerminatedBy (reserved "end")
   reserved "end"
-  return $ Ast.Block seq
+  return $ Ast.BlockF seq
 
 -- REPL Helper Functions
-parseString :: String -> Ast.Expr
+parseString :: String -> IO Ast.Expr
 parseString = parseSrc "<string input>"
 
-parseSrc :: String -> String -> Ast.Expr
-parseSrc file src = case parse langParser file src of
-  Left  e -> error $ show e
-  Right r -> r
+parseSrc :: String -> String -> IO Ast.Expr
+parseSrc fileName src = do
+  case parse langParser fileName src of
+    Left  e -> print e >> fail "parse error"
+    Right (Ast.ModF _ items :@: loc) -> do
+      let modName = modNameFromFileName fileName
+      return $ Ast.ModF modName items :@: loc
 
 parseFile :: String -> IO Ast.Expr
 parseFile fileName = do
   src <- readFile fileName
-  case parse langParser fileName src of
-    Left  e -> print e >> fail "parse error"
-    Right (Ast.Mod _ items) -> do
-      let modName = modNameFromFileName fileName
-      return $ Ast.Mod modName items
+  parseSrc fileName src
 
 modNameFromFileName :: String -> String
 modNameFromFileName fileName = capitalize $ takeBaseName fileName
   where capitalize (c:cs) = Char.toUpper c : cs
+
+spanned :: Parser (Ast.ExprF (At Ast.ExprF)) -> Parser (At Ast.ExprF)
+spanned p = do
+  p1 <- getPosition
+  exprF <- p
+  p2 <- getPosition
+  let pos = mkSpan p1 p2
+  return $ exprF :@: pos

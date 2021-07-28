@@ -61,7 +61,7 @@ main = do
 
 parseSrc :: Opts -> String -> IO Ast.Expr
 parseSrc opts src = do
-  let ast = Parser.parseSrc (filename opts) src
+  ast <- Parser.parseSrc (filename opts) src
   when (traceCompilation opts) $ do
     putStrLn "\n===AST==="
     printAst ast
@@ -134,4 +134,6 @@ compileAndRun ast = do
   return ()
 
 runProgram :: String -> IO ()
-runProgram src = compileAndRun $ Parser.parseString src
+runProgram src = do
+  ast <- Parser.parseString src
+  compileAndRun ast

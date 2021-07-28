@@ -8,24 +8,6 @@
 
 module Ast
   ( ExprF(..)
-  , pattern Var
-  , pattern Literal
-  , pattern Unary
-  , pattern Binary
-  , pattern Block
-  , pattern Call
-  , pattern Intrinsic
-  , pattern Let
-  , pattern Assign
-  , pattern LetConst
-  , pattern Ret
-  , pattern If
-  , pattern While
-  , pattern Loop
-  , pattern Nop
-  , pattern Ann
-  , pattern Def
-  , pattern Mod
   , itemName
   , isModLevelItem
   , modLevelItemTy
@@ -45,7 +27,7 @@ module Ast
 where
 
 import qualified Ty
-import           Cata                              ( Fix(..), RecTyped(..), Unwrap(..), cata )
+import           Cata                              ( At(..), RecTyped(..), Unwrap(..), cata )
 import           Utils                             ( (+++), code, indent )
 
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
@@ -78,7 +60,7 @@ data ExprF r
   | ModF String [r]
   deriving Functor
 
-type Expr = Fix ExprF
+type Expr = At ExprF
 
 itemName :: ExprF r -> Maybe String
 itemName = \case
@@ -110,25 +92,6 @@ modLevelItemTy = \case
 
   LetConstF _ (exprF :<: ty) :<: _ ->
     ty `Ty.addAttr` Ty.Fixed -- Just return the type of `e` in `static x = e`.
-
-pattern Var name = Fix (VarF name)
-pattern Literal x = Fix (LiteralF x)
-pattern Unary op x = Fix (UnaryF op x)
-pattern Binary op x y = Fix (BinaryF op x y)
-pattern Block seq = Fix (BlockF seq)
-pattern Call f args = Fix (CallF f args)
-pattern Intrinsic pos name args = Fix (IntrinsicF pos name args)
-pattern Let name expr = Fix (LetF name expr)
-pattern Assign name expr = Fix (AssignF name expr)
-pattern LetConst name expr = Fix (LetConstF name expr)
-pattern Ret x = Fix (RetF x)
-pattern If cond yes no = Fix (IfF cond yes no)
-pattern While cond body = Fix (WhileF cond body)
-pattern Loop body = Fix (LoopF body)
-pattern Nop = Fix NopF
-pattern Ann expr ty = Fix (AnnF expr ty)
-pattern Def name params retTy body = Fix (DefF name params retTy body)
-pattern Mod name items = Fix (ModF name items)
 
 data BinOp
   = ArithOp ArithOp
@@ -276,4 +239,4 @@ instance Show TypedExpr where
   show (e :<: t) = "(" ++ show e +++ ":" +++ show t ++ ")"
 
 instance Show Expr where
-  show (Fix e) = show e
+  show (e :@: _) = show e
