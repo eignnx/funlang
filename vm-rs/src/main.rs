@@ -1,6 +1,6 @@
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::{env, fs, io};
+use std::{fs, io};
 use structopt::StructOpt;
 
 mod instr;
