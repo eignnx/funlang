@@ -80,18 +80,17 @@ modLevelItemTy :: TypedExpr -> Ty.Ty
 modLevelItemTy = \case
 
   DefF _ params Nothing (_ :<: bodyTy) :<: _ ->
-    Ty.FnTy (map snd params) bodyTy `Ty.addAttr` Ty.Fixed
+    Ty.FnTy (map snd params) bodyTy
 
   DefF _ params (Just retTy) _ :<: _ ->
-    Ty.FnTy (map snd params) retTy `Ty.addAttr` Ty.Fixed
+    Ty.FnTy (map snd params) retTy
 
   ModF _ items :<: _ ->
-    (Ty.ModTy $ M.fromList $ pairs) `Ty.addAttr` Ty.Fixed
+    (Ty.ModTy $ M.fromList $ pairs)
       where getItemName (item :<: _) = maybe (error "") id $ itemName item
             pairs = zip (map getItemName items) (map modLevelItemTy items)
 
-  LetConstF _ (exprF :<: ty) :<: _ ->
-    ty `Ty.addAttr` Ty.Fixed -- Just return the type of `e` in `static x = e`.
+  LetConstF _ (exprF :<: ty) :<: _ -> ty -- Just return the type of `e` in `static x = e`.
 
 data BinOp
   = ArithOp ArithOp

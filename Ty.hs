@@ -12,10 +12,6 @@ module Ty
   , (<:)
   , (-&&>)
   , (>||<)
-  , isFixed
-  , downcastFixed
-  , downcastToFnTy
-  , addAttr
   )
 where
 
@@ -27,21 +23,18 @@ data Ty
   = ValTy String
   | FnTy [Ty] Ty
   | ModTy (M.Map String Ty) -- The type of a module
-  | Fixed Ty -- A type whose value is known at compile-time. Like `constexpr` in C++.
   deriving Eq
 
 instance Show Ty where
   show (ValTy name) = name
   show (FnTy params ret) = show params +++ "->" +++ show ret
   show (ModTy m) = "{" +++ intercalate ", " ((\(name, ty) -> name ++ ":" +++ show ty) <$> M.toList m) +++ "}"
-  show (Fixed ty) = "Fixed[" ++ show ty ++ "]"
 
 (<:) :: Ty -> Ty -> Bool
 NeverTy <: t2 = True
 t1 <: t2 | t1 == t2 = True
 FnTy x1 y1 <: FnTy x2 y2 = all (\(x1', x2') -> x2' <: x1') (zip x1 x2) && y1 <: y2
 ModTy m1 <: ModTy m2 = m2 `M.isSubmapOf` m1
-Fixed t1 <: t2 = t1 <: t2
 _ <: _ = False
 
 pattern NeverTy = ValTy "Never"
@@ -56,7 +49,6 @@ pattern TextTy  = ValTy "Text"
 --   `Never`, and it appears BEFORE the expression `1`. Therefore, the entire
 --   block should have type `Never`.
 (-&&>) :: Ty -> Ty -> Ty
-NeverTy -&&> _ = NeverTy
 _ -&&> ty = ty
 
 -- | This operator is used to join the types of two branches. It is always the
@@ -68,22 +60,3 @@ _ -&&> ty = ty
 sub >||< super | sub <: super = super
 super >||< sub | sub <: super = super
 _ >||< _ = error "Operator `>||<` can only accept types that are related!"
-
-isFixed :: Ty -> Bool
-isFixed = \case
-  Fixed _ -> True
-  _ -> False
-
-downcastFixed :: Ty -> Maybe Ty
-downcastFixed = \case
-  Fixed a -> Just a
-  _ -> Nothing
-
-downcastToFnTy :: Ty -> Maybe ([Ty], Ty)
-downcastToFnTy = \case
-  Fixed (FnTy a b) -> Just (a, b)
-  FnTy a b -> Just (a, b)
-  _ -> Nothing
-
-addAttr :: Ty -> (Ty -> Ty) -> Ty
-ty `addAttr` f = f ty

@@ -16,7 +16,7 @@ where
 
 import qualified Ast
 import           Ast           ( Typed(HasTy) )
-import           Ty            ( Ty(..), (<:), (-&&>), (>||<), downcastToFnTy, addAttr, isFixed )
+import           Ty            ( Ty(..), (<:), (-&&>), (>||<) )
 import           Utils         ( (+++), code, codeIdent, indent )
 import           Cata          ( RecTyped(..), At(..) )
 import qualified Intr
@@ -173,9 +173,7 @@ inferUnaryOp op argTy retTy expr = do
   exprRes <- check expr argTy
   case exprRes of
     Ok expr'@(_ :<: exprTy) -> do
-      let ty = if isFixed exprTy
-                then (exprTy -&&> retTy) `addAttr` Fixed
-                else exprTy -&&> retTy
+      let ty = exprTy -&&> retTy
       return $ Ok (Ast.UnaryF op expr' :<: ty)
     Err err -> return $ Err err
 
@@ -193,9 +191,7 @@ inferBinOp op argTy retTy e1 e2 = do
     e2Ty <- check e2 argTy
     case (e1Ty, e2Ty) of
       (Ok e1'@(_  :<: ty1), Ok e2'@(_ :<: ty2)) -> do
-        let ty = if isFixed ty1 && isFixed ty2
-                   then (ty1 -&&> ty2 -&&> retTy) `addAttr` Fixed
-                   else ty1 -&&> ty2 -&&> retTy
+        let ty = ty1 -&&> ty2 -&&> retTy
         return $ Ok (Ast.BinaryF op e1' e2' :<: ty)
       (a, b) -> return (a *> b)
 
@@ -219,10 +215,10 @@ instance CheckType Ast.Expr where
   infer (Ast.LiteralF x :@: loc) = do
     let lit = Ast.LiteralF x
     return $ case x of
-      Ast.Unit     -> Ok (lit :<: VoidTy)
-      Ast.Bool _   -> Ok (lit :<: (BoolTy `addAttr` Ty.Fixed))
-      Ast.Int _    -> Ok (lit :<: (IntTy  `addAttr` Ty.Fixed))
-      Ast.String _ -> Ok (lit :<: (TextTy `addAttr` Ty.Fixed))
+      Ast.Unit     -> Ok $ lit :<: VoidTy
+      Ast.Bool _   -> Ok $ lit :<: BoolTy
+      Ast.Int _    -> Ok $ lit :<: IntTy
+      Ast.String _ -> Ok $ lit :<: TextTy
 
   infer (Ast.UnaryF op@Ast.Not expr :@: loc) = inferUnaryOp op BoolTy BoolTy expr
   infer (Ast.UnaryF op@Ast.Neg expr :@: loc) = inferUnaryOp op IntTy IntTy expr
@@ -258,8 +254,7 @@ instance CheckType Ast.Expr where
   infer (Ast.CallF fn args :@: loc) = do
     fnRes <- infer fn
     case fnRes of
-      Ok fn'@(_ :<: fnTy) | isJust (downcastToFnTy fnTy) -> do
-        let Just (paramTys, retTy) = downcastToFnTy fnTy
+      Ok fn'@(_ :<: FnTy paramTys retTy) -> do
         argsRes <- checkArgs paramTys
         case argsRes of
           Ok args' -> do
@@ -327,13 +322,10 @@ instance CheckType Ast.Expr where
   infer (Ast.LetConstF name expr :@: loc) = do
     exprRes <- infer expr
     case exprRes of
-      Ok expr'@(_ :<: exprTy)
-        | isFixed exprTy -> do
-          define name exprTy
-          let letConst = Ast.LetConstF name expr'
-          return $ Ok (letConst :<: (exprTy -&&> VoidTy))
-        | otherwise -> return $ Err $ RootCause msg
-          where msg = "I can't set" +++ codeIdent name +++ "to" +++ code expr +++ "because the expression isn't const"
+      Ok expr'@(_ :<: exprTy) -> do
+        define name exprTy
+        let letConst = Ast.LetConstF name expr'
+        return $ Ok (letConst :<: (exprTy -&&> VoidTy))
       err -> return $ err `addError` msg
         where msg = "The declaration of" +++ codeIdent name +++ "doesn't type check"
 
@@ -416,7 +408,7 @@ instance CheckType Ast.Expr where
     put st -- Restore old ctx
     case bodyRes of
       Ok typedBody@(_ :<: bodyTy) -> do
-        define name $ FnTy paramTys bodyTy `addAttr` Fixed -- We MUST save the full type now.
+        define name $ FnTy paramTys bodyTy -- We MUST save the full type now.
         let def = Ast.DefF name params (Just retTy) typedBody
         return $ Ok (def :<: VoidTy)
       Err err -> return $ Err err
@@ -432,7 +424,7 @@ instance CheckType Ast.Expr where
     case bodyRes of
       Ok typedBody@(_ :<: bodyTy) -> do
         let def = Ast.DefF name params (Just bodyTy) typedBody
-        define name $ FnTy paramTys bodyTy `addAttr` Fixed -- We MUST save the full type now.
+        define name $ FnTy paramTys bodyTy -- We MUST save the full type now.
         return $ Ok (def :<: VoidTy)
       Err err -> return $ Err err
 
@@ -455,17 +447,17 @@ instance CheckType Ast.Expr where
       skimItemDefs =
         mconcat <$> (forM items $ \case
           Ast.DefF name params (Just retTy) _ :@: loc -> do
-            define name $ Fixed $ FnTy (map snd params) retTy `addAttr` Fixed
+            define name $ FnTy (map snd params) retTy
             return $ Ok ()
           Ast.DefF name params Nothing _ :@: loc -> do
             -- Since we don't know the return type, we have to stub for now.
-            define name $ Fixed $ FnTy (map snd params) NeverTy `addAttr` Fixed -- FIXME: see ./ex/rec-problem.rb
+            define name $ FnTy (map snd params) NeverTy -- FIXME: see ./ex/rec-problem.rb
             return $ Ok ()
           Ast.ModF name _ :@: loc -> do
-            define name $ ModTy M.empty `addAttr` Fixed
+            define name $ ModTy M.empty
             return $ Ok ()
           Ast.LetConstF name _ :@: loc -> do
-            define name $ NeverTy `addAttr` Fixed
+            define name $ NeverTy
             return $ Ok ()
           other -> return $ Err $ RootCause msg
             where msg = "I can't let you put the expression" +++ code other +++ "at the top-level of a module.")
@@ -570,7 +562,7 @@ instance CheckType Ast.Expr where
     case bodyRes of
       Ok body'@(_ :<: bodyTy) | retTy == bodyTy -> do
         let def = Ast.DefF name params (Just retTy) body'
-        define name $ FnTy paramTys bodyTy `addAttr` Fixed
+        define name $ FnTy paramTys bodyTy
         return $ Ok (def :<: VoidTy)
       Err err -> return $ (Err err) `addError` msg
         where msg = "The function" +++ codeIdent name +++ "does not match expected type" +++ code expected
@@ -585,7 +577,7 @@ instance CheckType Ast.Expr where
     case bodyRes of
       Ok body'@(_ :<: bodyTy) -> do
         let def = Ast.DefF name params Nothing body'
-        define name $ FnTy paramTys bodyTy `Ty.addAttr` Fixed
+        define name $ FnTy paramTys bodyTy
         return $ Ok (def :<: VoidTy)
       Err err -> return $ (Err err) `addError` msg
         where msg = "The function" +++ codeIdent name +++ "does not match expected type" +++ code expected

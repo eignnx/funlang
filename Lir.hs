@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Lir
   ( InstrAddr(..)
   , Value(..)
@@ -8,9 +10,13 @@ where
 
 import qualified Hir
 import qualified Intr
+import           Utils ( (+++) )
 
 newtype InstrAddr = InstrAddr Int
-  deriving (Show, Eq, Ord)
+  deriving (Eq, Ord)
+  
+instance Show InstrAddr where
+  show (InstrAddr x) = show x
 
 instance Num InstrAddr where
   (InstrAddr x) + (InstrAddr y) = InstrAddr (x + y)
@@ -60,4 +66,33 @@ data Instr
   | Call Int
   | CallDirect InstrAddr Int
   | Ret -- Jump back to return address
-  deriving (Show)
+
+instance Show Instr where
+  show = \case
+    Load x -> "Load" +++ x
+    Store x -> "Store" +++ x
+    Const v -> "Const" +++ show v
+    Dup -> "Dup"
+    Over -> "Over"
+    Rot -> "Rot"
+    Swap -> "Swap"
+    Pop -> "Pop"
+    Add -> "Add"
+    Sub -> "Sub"
+    Mul -> "Mul"
+    Div -> "Div"
+    Neg -> "Neg"
+    And -> "And"
+    Or -> "Or"
+    Not -> "Not"
+    Eq -> "Eq"
+    Gt -> "Gt"
+    Lt -> "Lt"
+    Concat -> "Concat"
+    Nop -> "Nop"
+    JmpIfFalse addr -> "JmpIfFalse" +++ show addr
+    Jmp addr -> "Jmp" +++ show addr
+    Intrinsic intr -> "Intrinsic" +++ show intr
+    Call argc -> "Call" +++ show argc
+    CallDirect addr argc -> "CallDirect" +++ show addr +++ show argc
+    Ret -> "Ret"

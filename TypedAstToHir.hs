@@ -103,7 +103,7 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.BlockF seq :<: ty) = compile seq
 
-  compile (Ast.CallF (Ast.VarF name :<: Ty.Fixed f) args :<: resTy) = do
+  compile (Ast.CallF (Ast.VarF name :<: f) args :<: resTy) = do
     args' <- compile args -- Using `instance Compile a => Compile [a]`
     value <- lookupFixed name -- FIXME: Ensure this works when fn names are shadowed.
     let Hir.VLbl lbl = value
@@ -113,9 +113,6 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.VarF name :<: ty)
     | ty <: Ty.VoidTy = return []
-    | Ty.isFixed ty = do
-      value <- lookupFixed name
-      return [Hir.Const value]
     | otherwise = return [Hir.Load name]
 
   compile (Ast.LiteralF lit   :<: ty) = return [Hir.Const (valueFromLit lit)]
@@ -165,10 +162,6 @@ instance Compile Ast.TypedExpr where
     | exprTy <: Ty.VoidTy = do
       expr' <- compile expr
       return $ expr'
-    | Ty.isFixed exprTy = do
-      let value = Comptime.eval expr
-      defineFixedValue name value
-      return []
     | otherwise = do
       expr' <- compile expr
       return $ expr' ++ [Hir.Store name]
