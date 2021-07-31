@@ -1,4 +1,4 @@
-use std::fmt::{Display, write};
+use std::fmt::Display;
 use std::fs;
 use std::io::{self, BufRead};
 use std::num::ParseIntError;

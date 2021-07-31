@@ -117,7 +117,7 @@ impl Vm {
         }
     }
 
-    fn call_direct(&mut self, InstrAddr(fn_addr): InstrAddr, argc: u8) {
+    fn call_direct(&mut self, InstrAddr(fn_addr): InstrAddr, _argc: u8) {
         // Store the return address above all the args.
         let InstrAddr(pc) = self.pc;
         self.ret_addrs.push(InstrAddr(pc + 1)); // Return to the NEXT instr.
