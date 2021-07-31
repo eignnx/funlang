@@ -1,5 +1,7 @@
-use std::env;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
+use std::{env, fs, io};
+use structopt::StructOpt;
 
 mod instr;
 mod vm;
@@ -7,10 +9,24 @@ mod vm;
 use instr::Mod;
 use vm::Vm;
 
+#[derive(Debug, StructOpt)]
+struct Opts {
+    #[structopt(name = "FILE", parse(from_os_str))]
+    file_name: Option<PathBuf>,
+
+    #[structopt(short = "T", long = "trace-vm")]
+    debug: bool,
+}
+
 fn main() {
-    let file_name: PathBuf = env::args().nth(1).expect("Must provide path!").into();
-    let m = Mod::from_file(&file_name);
+    let opts = Opts::from_args();
+    let reader: Box<dyn BufRead> = match opts.file_name {
+        Some(file_name) => Box::new(BufReader::new(
+            fs::File::open(file_name).expect("file doesnt exist"),
+        )),
+        None => Box::new(BufReader::new(io::stdin())),
+    };
+    let m = Mod::new(reader);
     let mut vm = Vm::new();
-    // vm.debug = true;
-    vm.exec(&m.instrs);
+    vm.exec(&m.instrs, opts.debug);
 }

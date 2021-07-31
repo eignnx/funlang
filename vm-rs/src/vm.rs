@@ -9,7 +9,6 @@ pub struct Vm {
     ret_addrs: Vec<InstrAddr>,
     pc: InstrAddr,
     running: bool,
-    pub debug: bool,
 }
 
 impl Vm {
@@ -20,7 +19,6 @@ impl Vm {
             ret_addrs: Vec::new(),
             pc: InstrAddr(0),
             running: true,
-            debug: false,
         }
     }
 
@@ -127,10 +125,10 @@ impl Vm {
         self.push_new_frame();
     }
 
-    fn step(&mut self, code: &[Instr]) {
+    fn step(&mut self, code: &[Instr], debug: bool) {
         let instr = &code[self.pc.0];
 
-        if self.debug {
+        if debug {
             eprintln!("--------------------");
             eprintln!("instr {} = {:?}", self.pc, instr);
             eprintln!("stack = {:?}", self.stack);
@@ -310,9 +308,9 @@ impl Vm {
         }
     }
 
-    pub fn exec(&mut self, code: &[Instr]) {
+    pub fn exec(&mut self, code: &[Instr], debug: bool) {
         while self.running {
-            self.step(code);
+            self.step(code, debug);
             self.incr_pc();
         }
     }

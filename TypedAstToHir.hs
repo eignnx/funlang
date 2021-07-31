@@ -39,25 +39,24 @@ fresh = do
 
 defineFn :: String -> CompState [Hir.Instr] -> CompState Hir.Lbl
 defineFn name compilation = do
+  -- First bind the name to a fresh lbl, store it in definitions.
   lbl <- fresh
-  hir <- compilation
-  let hir' = [Hir.Label lbl] ++ hir -- Label the function.
   defs <- gets defs_
+  modify $ \st -> st { defs_ = (name, Hir.VLbl lbl, []) : defs }
+
+  -- Then compile body and update hir in definition.
+  hir <- compilation
+  defs <- gets defs_
+  let hir' = [Hir.Label lbl] ++ hir -- Label the function.
   modify $ \st -> st { defs_ = (name, Hir.VLbl lbl, hir') : defs }
   return lbl
 
-defineFixedValue :: String -> Hir.Value -> CompState ()
-defineFixedValue name value = do
-  defs <- gets defs_
-  modify $ \st -> st { defs_ = (name, value, []) : defs }
-  return ()
-
-lookupFixed :: String -> CompState Hir.Value
-lookupFixed name = do
+lookupFnLbl :: String -> CompState Hir.Value
+lookupFnLbl name = do
   defs <- gets defs_
   case find (\(n, _, _) -> n == name) defs of
     Just (_, value, _) -> return value
-    Nothing -> error $ "Internal Compiler Error: Unknown fixed binding `" ++ name ++ "`"
+    Nothing -> error $ "Internal Compiler Error: Unknown fn binding `" ++ name ++ "`"
 
 class Compile a where
   compile :: a -> CompState [Hir.Instr]
@@ -105,7 +104,7 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.CallF (Ast.VarF name :<: f) args :<: resTy) = do
     args' <- compile args -- Using `instance Compile a => Compile [a]`
-    value <- lookupFixed name -- FIXME: Ensure this works when fn names are shadowed.
+    value <- lookupFnLbl name -- FIXME: Ensure this works when fn names are shadowed.
     let Hir.VLbl lbl = value
     let argC = length args
     return $ args' -- Code to push the arguments

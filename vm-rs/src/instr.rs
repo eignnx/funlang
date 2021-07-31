@@ -1,8 +1,6 @@
 use std::fmt::Display;
-use std::fs;
-use std::io::{self, BufRead};
+use std::io::BufRead;
 use std::num::ParseIntError;
-use std::path::Path;
 use std::str::FromStr;
 
 #[derive(Debug)]
@@ -11,11 +9,9 @@ pub struct Mod {
 }
 
 impl Mod {
-    pub fn from_file(file_name: &Path) -> Self {
+    pub fn new(reader: impl BufRead) -> Self {
         let mut instrs = vec![];
-        let f = fs::File::open(file_name).expect("Invalid path!");
-        let f = io::BufReader::new(f);
-        for line in f.lines() {
+        for line in reader.lines() {
             let line = line.unwrap();
             let segments: Vec<&str> = line.trim().split(" ").collect();
             let (first, segments) = segments.split_first().unwrap();

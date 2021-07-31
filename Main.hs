@@ -1,4 +1,5 @@
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Main where
 
@@ -14,14 +15,21 @@ import qualified Vm
 
 import           System.Exit                    ( exitWith, ExitCode(..) )
 import           System.Environment             ( getArgs )
+import           System.Process                 ( createProcess, proc, CreateProcess(..), StdStream(CreatePipe), waitForProcess )
+import           System.FilePath                ( (</>) )
 import           Data.List                      ( find, isPrefixOf, stripPrefix )
-import           Control.Monad                  ( when )
+import           Control.Monad                  ( when, forM_ )
 import           Text.Printf                    ( printf )
+import System.IO (hPutStr, hClose, hPutStrLn)
+
+data VmImpl = Hs | Rs
+  deriving (Show, Eq)
 
 data Opts
   = Opts { filename         :: String
          , traceCompilation :: Bool
          , traceVm          :: Bool
+         , vmImpl           :: VmImpl
          }
   deriving Show
 
@@ -45,9 +53,14 @@ getOpts = do
                            || flags `hasFlag` ("-T", "--trace-all")
       let traceVm =  flags `hasSubFlag` ("-T", "v", "--trace-vm")
                   || flags `hasFlag` ("-T", "--trace-all")
+      let vmImpl = case () of
+                        () | flags `hasSubFlag` ("-M", "-h", "--haskell-vm") -> Hs
+                           | flags `hasSubFlag` ("-M", "-r", "--rust-vm") -> Rs
+                           | otherwise -> Rs
       return $ Opts { filename = filename
                     , traceCompilation = traceCompilation
                     , traceVm = traceVm
+                    , vmImpl = vmImpl
                     } 
 
 main :: IO ()
@@ -97,10 +110,20 @@ hirToLir opts hir = do
   return lir
 
 execVmProgram :: Opts -> [Lir.Instr] -> IO ()
-execVmProgram opts lir = do
+execVmProgram opts lir | vmImpl opts == Hs = do
   finalState <- if traceVm opts
     then Vm.debugExecVmProgram lir
     else Vm.execVmProgram lir
+  return ()
+
+execVmProgram opts lir | vmImpl opts == Rs = do
+  let trace = if traceVm opts then ["--", "--trace-vm"] else []
+  let cmd = proc "cargo" $ "run" : trace
+  (Just pipe, _, _, h) <- createProcess cmd { cwd = Just ("." </> "vm-rs"), std_in = CreatePipe }
+  forM_ (zip lir [0..]) $ \(instr, idx) ->
+    hPutStrLn pipe $ show idx ++ ": " ++ show instr
+  hClose pipe
+  waitForProcess h
   return ()
 
 showAssoc assoc = unlines $ ["{"] ++ pairs ++ ["}"]
