@@ -25,7 +25,7 @@ import           Control.Monad ( foldM )
 import           Data.Semigroup
 import           Control.Monad.State
 import           Control.Applicative
-import           Data.Maybe    ( isJust )
+import           Data.Maybe    ( isJust, fromMaybe )
 
 data Res a
   = Ok a
@@ -42,7 +42,7 @@ instance Semigroup a => Semigroup (Res a) where
   (Err a) <> (Ok b) = Err a
 
 instance Monoid a => Monoid (Res a) where
-  mempty = Ok $ mempty
+  mempty = Ok mempty
 
 instance Functor Res where
   fmap f (Ok a) = Ok (f a)
@@ -78,7 +78,7 @@ addError (Err err) errMsg = Err (ResultingError errMsg err)
 
 type Ctx = M.Map String Ty
 
-data TyCheckerState
+newtype TyCheckerState
   = TyCheckerState { _ctx :: Ctx }
   deriving (Show)
 
@@ -95,8 +95,7 @@ define name ty = do
   return ty
 
 setFnRetTy :: Ty -> TyChecker Ty
-setFnRetTy ty = do
-  define "#ret" ty
+setFnRetTy = define "#ret"
 
 varLookup :: String -> TyChecker (Res Ty)
 varLookup name = do
@@ -124,11 +123,11 @@ instance CheckType (Intr.Intrinsic, [Ast.TypedExpr]) where
 
   infer (Intr.Print, args@[_ :<: argTy]) = do
     let printableTypes = [IntTy, BoolTy, TextTy, VoidTy]
-    if any (argTy <:) printableTypes then do
-      return $ Ok ((Intr.Print, args) `HasTy` (argTy -&&> VoidTy))
-    else do
-      return $ Err $ RootCause msg
-        where msg = "The `print` intrinsic cannot be applied to type" +++ code argTy
+    return $
+      if any (argTy <:) printableTypes
+        then Ok ((Intr.Print, args) `HasTy` (argTy -&&> VoidTy))
+        else Err $ RootCause msg
+          where msg = "The `print` intrinsic cannot be applied to type" +++ code argTy
 
   infer (Intr.Here pos, []) = return $ Ok $ (Intr.Here pos, []) `HasTy` VoidTy
   infer (Intr.Exit, [])     = return $ Ok $ (Intr.Exit, []) `HasTy` NeverTy
@@ -140,7 +139,7 @@ instance CheckType (Ast.Seq Ast.Expr) where
 
   type Checked (Ast.Seq Ast.Expr) = (Ast.Seq Ast.TypedExpr, Ty)
 
-  infer (Ast.Empty) = return $ Ok (Ast.Empty, VoidTy)
+  infer Ast.Empty = return $ Ok (Ast.Empty, VoidTy)
 
   infer (Ast.Result e) = do
     eRes <- infer e
@@ -259,7 +258,7 @@ instance CheckType Ast.Expr where
         case argsRes of
           Ok args' -> do
             let call = Ast.CallF fn' args'
-            let argsExeTy = foldr (-&&>) VoidTy (map (\(_ :<: ty) -> ty) args')
+            let argsExeTy = foldr ((-&&>) . (\(_ :<: ty) -> ty)) VoidTy args'
             return $ Ok (call :<: (argsExeTy -&&> retTy))
           Err err -> return $ Err err `addError` msg
             where msg = "I can't type check the function call at" +++ show loc
@@ -268,15 +267,13 @@ instance CheckType Ast.Expr where
         argsRes <- sequenceA <$> mapM infer args
         let rebuild args' = Ast.CallF fn' args' :<: NeverTy
         return $ rebuild <$> argsRes
-      Ok (_ :<: nonFnTy) -> return $ Err $ RootCause $ msg
+      Ok (_ :<: nonFnTy) -> return $ Err $ RootCause msg
         where msg = code fn +++ "is a" +++ code nonFnTy ++ ", not a function"
       err -> return err
     where
       checkArgs :: [Ty] -> TyChecker (Res [Ast.TypedExpr])
-      checkArgs argTys | length args == length argTys = do
-        sequenceA <$> zipWithM check args argTys -- Check that the args have right types.
-      checkArgs argTys = do -- Wrong number of args provided.
-        return $ Err $ RootCause msg
+      checkArgs argTys | length args == length argTys = sequenceA <$> zipWithM check args argTys -- Check that the args have right types.
+      checkArgs argTys = return $ Err $ RootCause msg
           where msg = "Oops! You passed" +++ show received +++ "arguments to"
                     +++ code fn ++ ", but it expects" +++ show expected
                 expected = length argTys
@@ -376,8 +373,7 @@ instance CheckType Ast.Expr where
         (Ok cond'@(_ :<: condTy), Ok body'@(_ :<: bodyTy)) -> do
           let while = Ast.WhileF cond' body'
           return $ Ok (while :<: (condTy -&&> bodyTy))
-        (res1, res2) -> do
-          return $ (res1 `addError` msg1) *> (res2 `addError` msg2)
+        (res1, res2) -> return $ (res1 `addError` msg1) *> (res2 `addError` msg2)
           where msg1 = "The condition of this `while` loop doesn't have type" +++ code BoolTy
                 msg2 = "The body of a this `while` loop doesn't have type" +++ code VoidTy
 
@@ -394,7 +390,7 @@ instance CheckType Ast.Expr where
 
   infer (Ast.AnnF expr ty :@: loc) = do
     res <- check expr ty
-    let rebuild expr' = (Ast.AnnF expr' ty :<: ty)
+    let rebuild expr' = Ast.AnnF expr' ty :<: ty
     return $ (rebuild <$> res) `addError` msg
       where msg = "The expression" +++ code expr +++ "does not have type" +++ code ty
 
@@ -402,8 +398,7 @@ instance CheckType Ast.Expr where
   infer (Ast.DefF name params (Just retTy) body :@: loc) = do
     setFnRetTy retTy -- Set fn's return type.
     st <- get -- Save current ctx
-    paramTys <- forM params $ \(param, paramTy) -> do
-      define param paramTy
+    paramTys <- forM params $ uncurry define
     bodyRes <- check body retTy
     put st -- Restore old ctx
     case bodyRes of
@@ -417,8 +412,7 @@ instance CheckType Ast.Expr where
   infer (Ast.DefF name params Nothing body :@: loc) = do
     setFnRetTy NeverTy -- We don't know the fn's return type yet! FIXME: seems bad...
     st <- get -- Save current ctx
-    paramTys <- forM params $ \(param, paramTy) -> do
-      define param paramTy
+    paramTys <- forM params $ uncurry define
     bodyRes <- infer body
     put st -- Restore old ctx
     case bodyRes of
@@ -436,7 +430,7 @@ instance CheckType Ast.Expr where
         itemsRes <- mapM infer items
         case sequenceA itemsRes of
           Ok items' -> do
-            let mkPair item@(itemF :<: _) = (maybe (error "bad item name!") id $ Ast.itemName itemF, Ast.modLevelItemTy item)
+            let mkPair item@(itemF :<: _) = (Data.Maybe.fromMaybe (error "bad item name!") $ Ast.itemName itemF, Ast.modLevelItemTy item)
             let modTy = ModTy $ M.fromList $ map mkPair items'
             let mod = Ast.ModF name items'
             define name modTy
@@ -445,7 +439,7 @@ instance CheckType Ast.Expr where
     where
       skimItemDefs :: TyChecker (Res ())
       skimItemDefs =
-        mconcat <$> (forM items $ \case
+        mconcat <$> forM items (\case
           Ast.DefF name params (Just retTy) _ :@: loc -> do
             define name $ FnTy (map snd params) retTy
             return $ Ok ()
@@ -457,7 +451,7 @@ instance CheckType Ast.Expr where
             define name $ ModTy M.empty
             return $ Ok ()
           Ast.LetConstF name _ :@: loc -> do
-            define name $ NeverTy
+            define name NeverTy
             return $ Ok ()
           other -> return $ Err $ RootCause msg
             where msg = "I can't let you put the expression" +++ code other +++ "at the top-level of a module.")
@@ -495,10 +489,10 @@ instance CheckType Ast.Expr where
         let ifExpr = Ast.IfF cond' yes' no'
         return $ Ok (ifExpr :<: (condTy -&&> ty))
       (condErr@(Err _), yesRes, noRes) ->
-        return $ (condErr' <* yesRes <* noRes)
+        return (condErr' <* yesRes <* noRes)
           where condErr' = condErr `addError` msg
                 msg = "The condition of an `if` must have type" +++ code BoolTy ++ ", but this one doesn't"
-      (_, yesRes, noRes) -> return $ (yesRes *> noRes)
+      (_, yesRes, noRes) -> return (yesRes *> noRes)
 
 --   -- check ctx fn@(FnExpr param body) (FnTy paramTy retTy) =
 --   --   let pName = paramName param
@@ -525,19 +519,18 @@ instance CheckType Ast.Expr where
     else
       return $ Err $ RootCause ("A let declaration has type" +++ code VoidTy)
 
-  check (Ast.AssignF name expr :@: loc) ty = do
-    if ty == VoidTy then do
-      nameRes <- varLookup name
-      case nameRes of
-        Ok varTy -> do
-          res <- check expr varTy
-          return $ rebuild <$> res
-            where rebuild expr'@(_ :<: exprTy) =
-                    Ast.AssignF name expr' :<: (exprTy -&&> VoidTy)
-        Err err -> return (Err err `addError` msg)
-          where msg = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
-    else
-      return $ Err $ RootCause ("Assignments have type" +++ code VoidTy)
+  check (Ast.AssignF name expr :@: loc) ty = if ty == VoidTy then do
+                                               nameRes <- varLookup name
+                                               case nameRes of
+                                                 Ok varTy -> do
+                                                   res <- check expr varTy
+                                                   return $ rebuild <$> res
+                                                     where rebuild expr'@(_ :<: exprTy) =
+                                                             Ast.AssignF name expr' :<: (exprTy -&&> VoidTy)
+                                                 Err err -> return (Err err `addError` msg)
+                                                   where msg = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
+                                             else
+                                               return $ Err $ RootCause ("Assignments have type" +++ code VoidTy)
 
   check (Ast.LetConstF name expr :@: loc) ty =
     if ty <: VoidTy then do
@@ -555,8 +548,7 @@ instance CheckType Ast.Expr where
   -- For when the return type IS specified.
   check (Ast.DefF name params (Just retTy) body :@: loc) expected | expected <: VoidTy = do
     st <- get -- Save current ctx
-    paramTys <- forM params $ \(param, paramTy) -> do
-      define param paramTy
+    paramTys <- forM params $ uncurry define
     bodyRes <- check body retTy
     put st -- Restore old ctx
     case bodyRes of
@@ -564,14 +556,13 @@ instance CheckType Ast.Expr where
         let def = Ast.DefF name params (Just retTy) body'
         define name $ FnTy paramTys bodyTy
         return $ Ok (def :<: VoidTy)
-      Err err -> return $ (Err err) `addError` msg
+      Err err -> return $ Err err `addError` msg
         where msg = "The function" +++ codeIdent name +++ "does not match expected type" +++ code expected
 
   -- For when the return type is NOT specified.
   check (Ast.DefF name params Nothing body :@: loc) expected | expected <: VoidTy = do
     st <- get -- Save current ctx
-    paramTys <- forM params $ \(param, paramTy) -> do
-      define param paramTy
+    paramTys <- forM params $ uncurry define
     bodyRes <- infer body
     put st -- Restore old ctx
     case bodyRes of
@@ -579,14 +570,13 @@ instance CheckType Ast.Expr where
         let def = Ast.DefF name params Nothing body'
         define name $ FnTy paramTys bodyTy
         return $ Ok (def :<: VoidTy)
-      Err err -> return $ (Err err) `addError` msg
+      Err err -> return $ Err err `addError` msg
         where msg = "The function" +++ codeIdent name +++ "does not match expected type" +++ code expected
 
   check (Ast.ModF name items :@: loc) expected | expected <: VoidTy = do
     itemsRes <- sequenceA <$> mapM infer items
     case itemsRes of
-      Ok items' -> do
-        return $ Ok $ Ast.ModF name items' :<: VoidTy
+      Ok items' -> return $ Ok $ Ast.ModF name items' :<: VoidTy
       Err err -> return $ Err err
 
   -- Default case.
@@ -608,8 +598,7 @@ checkSameType e1 e2 = do
     Ok e1'@(_ :<: ty1) -> do
       e2Res <- check e2 ty1 -- Both args must be of same type.
       case e2Res of
-        Ok e2' -> do
-          return $ Ok (e1', e2')
+        Ok e2' -> return $ Ok (e1', e2')
         Err err -> return $ Err err `addError` msg
           where msg = "Both" +++ code e1 +++ "and" +++ code e2 +++ "must have the same type, but they don't"
     Err err -> do -- If we CAN'T infer e1, let's see if we can infer e2.
@@ -618,8 +607,7 @@ checkSameType e1 e2 = do
         Ok e2'@(_ :<: ty2) -> do
           e1CheckRes <- check e1 ty2
           case e1CheckRes of
-            Ok e1' -> do
-              return $ Ok (e1', e2')
+            Ok e1' -> return $ Ok (e1', e2')
             Err err -> return $ Err err
         Err err -> return $ Err err `addError` msg
           where msg = "I can't infer the type of" +++ code e1 +++ "or of" +++ code e2
