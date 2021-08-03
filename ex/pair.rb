@@ -22,7 +22,7 @@ end
 #  10: Ret
 #  11: Nop
 #  12: Const VInt 123
-#  13: Const VString "abc"
+#  13: Const VText "abc"
 #  14: CallDirect 2 2
 #  15: Store p
 #  16: Load p

@@ -43,7 +43,7 @@ def id[x: Text] = x
 #  14: Intrinsic Exit
 #  15: Nop
 #  16: Store "name"
-#  17: Const (VString "Hello ")
+#  17: Const (VText "Hello ")
 #  18: Load "name"
 #  19: Load "say2"
 #  20: Call 2
@@ -86,12 +86,12 @@ def id[x: Text] = x
 #  57: Nop
 #  58: Ret
 #  59: Nop
-#  60: Const (VString "Quincy")
+#  60: Const (VText "Quincy")
 #  61: Store "name"
-#  62: Const (VString "Digger")
+#  62: Const (VText "Digger")
 #  63: Load "greet"
 #  64: Call 1
-#  65: Const (VString "Pippen")
+#  65: Const (VText "Pippen")
 #  66: Load "greet"
 #  67: Call 1
 #  68: Load "name"

@@ -19,7 +19,7 @@ end
 #   5: Call 0
 #   6: Intrinsic Exit
 #   7: Nop
-#   8: Const (VString "Digger")
+#   8: Const (VText "Digger")
 #   9: Load "greet-digger"
 #  10: Call 1
 #  11: Store "greeting"
@@ -28,13 +28,13 @@ end
 #  14: Ret
 #  15: Nop
 #  16: Store "name"
-#  17: Const (VString "Digger")
+#  17: Const (VText "Digger")
 #  18: Load "name"
 #  19: Eq
 #  20: JmpIfFalse (InstrAddr 23)
-#  21: Const (VString "You're a good doggy!")
+#  21: Const (VText "You're a good doggy!")
 #  22: Jmp (InstrAddr 25)
 #  23: Nop
-#  24: Const (VString "Who are you?")
+#  24: Const (VText "Who are you?")
 #  25: Nop
 #  26: Ret

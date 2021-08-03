@@ -29,7 +29,7 @@ instance Num InstrAddr where
 data Value
   = VInt Int
   | VBool Bool
-  | VString String
+  | VText String
   | VInstrAddr InstrAddr
   | VPtr Int
   deriving (Show, Eq)
@@ -37,7 +37,7 @@ data Value
 dbgValue :: Value -> IO ()
 dbgValue (VInt    x) = print x
 dbgValue (VBool   x) = print x
-dbgValue (VString x) = print x
+dbgValue (VText x) = print x
 
 data Instr
   = Load String

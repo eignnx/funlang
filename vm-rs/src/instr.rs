@@ -102,7 +102,7 @@ pub enum Instr {
 pub enum Value {
     VInt(i64),
     VBool(bool),
-    VString(String),
+    VText(String),
     VInstrAddr(InstrAddr),
     VPtr(usize),
 }
@@ -113,7 +113,7 @@ impl Display for Value {
         match self {
             VInt(x) => write!(f, "{}", x),
             VBool(x) => write!(f, "{}", x),
-            VString(x) => write!(f, "{:?}", x),
+            VText(x) => write!(f, "{:?}", x),
             VInstrAddr(x) => write!(f, "@{}", x),
             VPtr(x) => write!(f, "*{}", x),
         }
@@ -126,10 +126,10 @@ fn decode_value(segments: &[&str]) -> Value {
         ["VInt", i] => VInt(i.parse().unwrap()),
         ["VBool", "True"] => VBool(true),
         ["VBool", "False"] => VBool(false),
-        ["VString", s @ ..] => {
+        ["VText", s @ ..] => {
             let s = s.join(" ");
             let s = s[1..s.len() - 1].to_string(); // Remove quotes.
-            VString(s)
+            VText(s)
         }
         ["VInstrAddr", a] => VInstrAddr(a.parse().unwrap()),
         ["VPtr", p] => VPtr(p.parse().unwrap()),

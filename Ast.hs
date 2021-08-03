@@ -124,7 +124,7 @@ data OtherOp
 data Lit e
   = Bool Bool
   | Int Integer
-  | String String
+  | Text String
   | Unit
   | Pair (e, e)
   deriving (Show, Functor)
@@ -198,7 +198,7 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (VarF name) = name
   show (LiteralF (Int x)) = show x
   show (LiteralF (Bool x)) = if x then "true" else "false"
-  show (LiteralF (String x)) = show x
+  show (LiteralF (Text x)) = show x
   show (LiteralF (Pair (x, y))) = "(" ++ show x ++ "," +++ show y ++ ")"
   show (UnaryF Not x) = "not " ++ show x
   show (UnaryF Neg x) = "-(" ++ show x ++ ")"

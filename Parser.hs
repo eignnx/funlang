@@ -301,7 +301,7 @@ arguments = brackets $ sepEndBy expression comma
 literal :: Parser (Ast.Lit Ast.Expr)
 literal =  (Ast.Int <$> integer)
        <|> (Ast.Bool <$> boolean)
-       <|> (Ast.String <$> stringLiteral)
+       <|> (Ast.Text <$> stringLiteral)
        <|> (Ast.Pair <$> pair)
  where
   boolean =

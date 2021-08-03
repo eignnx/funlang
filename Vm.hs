@@ -54,10 +54,10 @@ popBool = do
   let Lir.VBool x = val
   return x
 
-popString :: VmProgram String
-popString = do
+popText :: VmProgram String
+popText = do
   val <- pop
-  let Lir.VString x = val
+  let Lir.VText x = val
   return x
 
 popInstrAddr :: VmProgram Lir.InstrAddr
@@ -205,9 +205,9 @@ stepVm instr = do
       b <- popBool
       push (Lir.VBool (not b))
     Lir.Concat -> do
-      a <- popString
-      b <- popString
-      push $ Lir.VString $ a ++ b
+      a <- popText
+      b <- popText
+      push $ Lir.VText $ a ++ b
     Lir.Jmp        idx -> setPc (idx - 1)
     Lir.JmpIfFalse idx -> do
       b <- popBool
@@ -267,8 +267,8 @@ runIntrinsic op = case op of
     y <- popBool
     push $ Lir.VBool $ x == y
   Intr.EqText -> do
-    x <- popString
-    y <- popString
+    x <- popText
+    y <- popText
     push $ Lir.VBool $ x == y
   Intr.DbgInt -> do
     x <- popInt
@@ -277,10 +277,10 @@ runIntrinsic op = case op of
     x <- popBool
     lift $ Lir.dbgValue $ Lir.VBool x
   Intr.DbgText -> do
-    x <- popString
-    lift $ Lir.dbgValue $ Lir.VString x
+    x <- popText
+    lift $ Lir.dbgValue $ Lir.VText x
   Intr.Puts -> do
-    x <- popString
+    x <- popText
     lift $ putStrLn x
   Intr.Here pos -> do
     lift $ putStrLn ("intr.here[] at " ++ show pos)

@@ -28,7 +28,7 @@ end
 #  12: Load "continue"
 #  13: Eq
 #  14: JmpIfFalse (InstrAddr 20)
-#  15: Const (VString "in f")
+#  15: Const (VText "in f")
 #  16: Pop
 #  17: Const (VBool False)
 #  18: Store "continue"
@@ -36,10 +36,10 @@ end
 #  20: Nop
 #  21: Ret
 #  22: Nop
-#  23: Const (VString "in main")
+#  23: Const (VText "in main")
 #  24: Pop
 #  25: Load "f"
 #  26: Call 0
-#  27: Const (VString "<Void>")
+#  27: Const (VText "<Void>")
 #  28: Intrinsic Print
 #  29: Ret

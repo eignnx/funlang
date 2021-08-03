@@ -119,9 +119,9 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.LiteralF lit :<: ty) =
     case lit of
-      Ast.Int    x    -> return $ pure $ Hir.Const $ Hir.VInt $ fromIntegral x
-      Ast.Bool   x    -> return $ pure $ Hir.Const $ Hir.VBool x
-      Ast.String x    -> return $ pure $ Hir.Const $ Hir.VString x
+      Ast.Int  x -> return $ pure $ Hir.Const $ Hir.VInt $ fromIntegral x
+      Ast.Bool x -> return $ pure $ Hir.Const $ Hir.VBool x
+      Ast.Text x -> return $ pure $ Hir.Const $ Hir.VText x
       Ast.Pair (a, b) -> do
         a' <- compile a
         b' <- compile b
@@ -153,7 +153,7 @@ instance Compile Ast.TypedExpr where
   -- Intercept the call to deal with `Void` specially. https://pbs.twimg.com/media/EU0GDTVU4AY73KC?format=jpg&name=small
   compile intr@(Ast.IntrinsicF pos "print" [arg@(_ :<: Ty.VoidTy)] :<: ty) = do
     let intr = Intr.fromName "print" pos
-    return [ Hir.Const $ Hir.VString "<Void>"
+    return [ Hir.Const $ Hir.VText "<Void>"
            , Hir.Intrinsic intr
            ]
 

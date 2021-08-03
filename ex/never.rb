@@ -35,12 +35,12 @@ end
 # Call 0
 # Intrinsic Exit
 # Label (Lbl 0)
-# Const (VString "pls pop me!")
+# Const (VText "pls pop me!")
 # Pop
 # Label (Lbl 1)
 # Intrinsic (Here ".\\ex\\never.rb" (line 4, column 5))
 # Jmp (Lbl 1)
-# Const (VString "Infinity: reached.")
+# Const (VText "Infinity: reached.")
 # Intrinsic Print
 # Ret
 # Label (Lbl 2)
@@ -58,12 +58,12 @@ end
 #   5: Call 0
 #   6: Intrinsic Exit
 #   7: Nop
-#   8: Const (VString "pls pop me!")
+#   8: Const (VText "pls pop me!")
 #   9: Pop
 #  10: Nop
 #  11: Intrinsic (Here ".\\ex\\never.rb" (line 4, column 5))
 #  12: Jmp (InstrAddr 10)
-#  13: Const (VString "Infinity: reached.")
+#  13: Const (VText "Infinity: reached.")
 #  14: Intrinsic Print
 #  15: Ret
 #  16: Nop

@@ -39,7 +39,7 @@ end
 # Label (Lbl 2)
 # Load "never-call-fn"
 # Call 0
-# Const (VString "Done.")
+# Const (VText "Done.")
 # Intrinsic Print
 # Ret
 
@@ -63,5 +63,5 @@ end
 #  15: Nop
 #  16: Load "never-call-fn"
 #  17: Call 0
-#  18: Const (VString "Done.")
+#  18: Const (VText "Done.")
 #  19: Intrinsic Pr

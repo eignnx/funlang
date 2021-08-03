@@ -201,7 +201,7 @@ instance CheckType Ast.Expr where
 
       Ast.Int i    -> return $ Ok $ Ast.LiteralF (Ast.Int i) :<: IntTy
 
-      Ast.String t -> return $ Ok $ Ast.LiteralF (Ast.String t) :<: TextTy
+      Ast.Text t -> return $ Ok $ Ast.LiteralF (Ast.Text t) :<: TextTy
 
       Ast.Pair (a, b) -> do
         aRes <- infer a

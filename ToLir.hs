@@ -81,6 +81,6 @@ translateValue :: LblMap
 translateValue labels = \case
   Hir.VInt x -> Lir.VInt x
   Hir.VBool x -> Lir.VBool x
-  Hir.VString x -> Lir.VString x
+  Hir.VText x -> Lir.VText x
   Hir.VLbl lbl -> Lir.VInstrAddr $ translateLbl labels lbl
   Hir.VPtr idx -> Lir.VPtr idx

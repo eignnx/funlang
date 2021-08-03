@@ -65,10 +65,10 @@ impl Vm {
         }
     }
 
-    fn pop_string(&mut self) -> String {
+    fn pop_text(&mut self) -> String {
         match self.pop() {
-            Value::VString(x) => x,
-            x => panic!("Expected VString at TOS, got {:?}!", x),
+            Value::VText(x) => x,
+            x => panic!("Expected VText at TOS, got {:?}!", x),
         }
     }
 
@@ -143,8 +143,8 @@ impl Vm {
             }
 
             Intrinsic::EqText => {
-                let x = self.pop_string();
-                let y = self.pop_string();
+                let x = self.pop_text();
+                let y = self.pop_text();
                 self.push(Value::VBool(x == y))
             }
 
@@ -152,7 +152,7 @@ impl Vm {
 
             Intrinsic::DbgBool => println!("{:?}", self.pop_bool()),
 
-            Intrinsic::DbgText => println!("{:?}", self.pop_string()),
+            Intrinsic::DbgText => println!("{:?}", self.pop_text()),
 
             Intrinsic::Puts => println!("{}", self.pop()),
 
@@ -292,9 +292,9 @@ impl Vm {
             }
 
             Instr::Concat => {
-                let x = self.pop_string();
-                let y = self.pop_string();
-                self.push(Value::VString(x + &y));
+                let x = self.pop_text();
+                let y = self.pop_text();
+                self.push(Value::VText(x + &y));
             }
 
             Instr::Alloc(n) => {

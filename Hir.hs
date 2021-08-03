@@ -21,7 +21,7 @@ instance Num Lbl where
 data Value
   = VInt Int
   | VBool Bool
-  | VString String
+  | VText String
   | VLbl Lbl
   | VPtr Int
   deriving (Show, Eq)

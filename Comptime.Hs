@@ -17,7 +17,7 @@ eval = cata \case
   -- Literals are trivially comptime evaluable.
   Ast.LiteralF (Ast.Bool x)   -> Hir.VBool x
   Ast.LiteralF (Ast.Int x)    -> Hir.VInt $ fromIntegral x
-  Ast.LiteralF (Ast.String x) -> Hir.VString x
+  Ast.LiteralF (Ast.Text x)   -> Hir.VText x
 
   Ast.UnaryF Ast.Not e -> let
     Hir.VBool x = e
@@ -69,6 +69,6 @@ evalValueBoolBinOp op x y = Hir.VBool $ x `op` y
 
 evalTextTextBinOp :: (String -> String -> String) -> Hir.Value -> Hir.Value -> Hir.Value
 evalTextTextBinOp op x y = let
-  Hir.VString x' = x
-  Hir.VString y' = y
-  in Hir.VString $ x' `op` y'
+  Hir.VText x' = x
+  Hir.VText y' = y
+  in Hir.VText $ x' `op` y'
