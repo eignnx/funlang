@@ -45,6 +45,6 @@ sig = \case
   DbgBool -> ([Ty.BoolTy], Ty.VoidTy)
   DbgText -> ([Ty.TextTy], Ty.VoidTy)
   Puts    -> ([Ty.TextTy], Ty.VoidTy)
-  Here _  -> ([], Ty.TextTy)
+  Here _  -> ([], Ty.VoidTy)
   Exit    -> ([], Ty.NeverTy)
   
