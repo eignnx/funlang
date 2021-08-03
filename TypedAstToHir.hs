@@ -125,7 +125,7 @@ instance Compile Ast.TypedExpr where
       Ast.Pair (a, b) -> do
         a' <- compile a
         b' <- compile b
-        return $ [Hir.Alloc 2] ++ a' ++ [Hir.MemWrite 0] ++ b' ++ [Hir.MemWrite 1]
+        return $ [Hir.Alloc 2] ++ a' ++ [Hir.MemWriteDirect 0] ++ b' ++ [Hir.MemWriteDirect 1]
 
   compile (Ast.UnaryF op expr :<: ty) = do
     expr' <- compile expr
@@ -242,7 +242,7 @@ instance Compile Ast.TypedExpr where
 instance Compile Ast.UnaryOp where
   compile Ast.Not = return [Hir.Not]
   compile Ast.Neg = return [Hir.Neg]
-  compile (Ast.TupleProj idx) = return [Hir.MemRead $ fromIntegral idx]
+  compile (Ast.TupleProj idx) = return [Hir.MemReadDirect $ fromIntegral idx]
 
 instance Compile Ast.BinOp where
   compile (Ast.ArithOp   op) = compile op

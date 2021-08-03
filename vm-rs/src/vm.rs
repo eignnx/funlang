@@ -309,14 +309,14 @@ impl Vm {
             // AFTER:
             // TOS -> [buf_start: Value::VPtr]
             //        [...]
-            Instr::MemWrite(offset) => {
+            Instr::MemWriteDirect(offset) => {
                 let val = self.pop();
                 let buf_start = self.pop_ptr();
                 heap.mem[buf_start + offset] = val;
                 self.push(Value::VPtr(buf_start));
             }
 
-            Instr::MemRead(offset) => {
+            Instr::MemReadDirect(offset) => {
                 let buf_start = self.pop_ptr();
                 let val = heap.mem[buf_start + offset].clone();
                 self.push(val);

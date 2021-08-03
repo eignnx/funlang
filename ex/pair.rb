@@ -16,9 +16,9 @@ end
 #   4: Store a
 #   5: Alloc 2
 #   6: Load a
-#   7: MemWrite 0
+#   7: MemWriteDirect 0
 #   8: Load b
-#   9: MemWrite 1
+#   9: MemWriteDirect 1
 #  10: Ret
 #  11: Nop
 #  12: Const VInt 123
@@ -26,9 +26,9 @@ end
 #  14: CallDirect 2 2
 #  15: Store p
 #  16: Load p
-#  17: MemRead 0
+#  17: MemReadDirect 0
 #  18: Intrinsic DbgInt
 #  19: Load p
-#  20: MemRead 1
+#  20: MemReadDirect 1
 #  21: Intrinsic DbgText
 #  22: Ret

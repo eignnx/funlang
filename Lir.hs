@@ -60,8 +60,8 @@ data Instr
   | Lt
   | Concat
   | Alloc Int
-  | MemWrite Int
-  | MemRead Int
+  | MemWriteDirect Int
+  | MemReadDirect Int
   | Nop -- Used to replace labels
   | JmpIfFalse InstrAddr
   | Jmp InstrAddr
@@ -92,8 +92,8 @@ instance Show Instr where
     Lt -> "Lt"
     Concat -> "Concat"
     Alloc n -> "Alloc" +++ show n
-    MemWrite n -> "MemWrite" +++ show n
-    MemRead n -> "MemRead" +++ show n
+    MemWriteDirect n -> "MemWriteDirect" +++ show n
+    MemReadDirect n -> "MemReadDirect" +++ show n
     Nop -> "Nop"
     JmpIfFalse addr -> "JmpIfFalse" +++ show addr
     Jmp addr -> "Jmp" +++ show addr
