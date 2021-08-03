@@ -60,8 +60,8 @@ languageDef = emptyDef
                             , "=" -- assignment
                             , "<"
                             , ">"
-                            , "=="
-                            , "!="
+                            -- , "=="
+                            -- , "!="
                             , "++"
                             , "->"
                             ]
@@ -197,8 +197,8 @@ operators =
     ]
   , [ Infix (binaryOp (reservedOp ">")  (Ast.BinaryF (Ast.RelOp Ast.Gt)))  AssocLeft
     , Infix (binaryOp (reservedOp "<")  (Ast.BinaryF (Ast.RelOp Ast.Lt)))  AssocLeft
-    , Infix (binaryOp (reservedOp "==") (Ast.BinaryF (Ast.RelOp Ast.Eq)))  AssocLeft
-    , Infix (binaryOp (reservedOp "!=") (Ast.BinaryF (Ast.RelOp Ast.Neq))) AssocLeft
+    -- , Infix (binaryOp (reservedOp "==") (Ast.BinaryF (Ast.RelOp Ast.Eq)))  AssocLeft
+    -- , Infix (binaryOp (reservedOp "!=") (Ast.BinaryF (Ast.RelOp Ast.Neq))) AssocLeft
     ]
   , [ Infix (binaryOp (reserved "and") (Ast.BinaryF (Ast.BoolOp Ast.And))) AssocLeft
     , Infix (binaryOp (reserved "or")  (Ast.BinaryF (Ast.BoolOp Ast.Or)))  AssocLeft

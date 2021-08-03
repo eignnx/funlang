@@ -101,17 +101,36 @@ impl Vm {
 
     fn run_intrinsic(&mut self, intr: &Intrinsic) {
         match intr {
-            Intrinsic::Print => {
-                println!("{}", self.pop());
+
+            Intrinsic::EqInt => {
+                let x = self.pop_int();
+                let y = self.pop_int();
+                self.push(Value::VBool(x == y))
             }
 
-            Intrinsic::Here(loc) => {
-                println!("{}", loc);
+            Intrinsic::EqBool => {
+                let x = self.pop_bool();
+                let y = self.pop_bool();
+                self.push(Value::VBool(x == y))
             }
 
-            Intrinsic::Exit => {
-                self.running = false;
+            Intrinsic::EqText => {
+                let x = self.pop_string();
+                let y = self.pop_string();
+                self.push(Value::VBool(x == y))
             }
+
+            Intrinsic::DbgInt => println!("{:?}", self.pop_int()),
+
+            Intrinsic::DbgBool => println!("{:?}", self.pop_bool()),
+
+            Intrinsic::DbgText => println!("{:?}", self.pop_string()),
+
+            Intrinsic::Puts => println!("{}", self.pop()),
+
+            Intrinsic::Here(loc) => println!("{}", loc),
+
+            Intrinsic::Exit => self.running = false,
         }
     }
 
@@ -230,12 +249,6 @@ impl Vm {
             Instr::Not => {
                 let x = self.pop_bool();
                 self.push(Value::VBool(!x));
-            }
-
-            Instr::Eq => {
-                let x = self.pop();
-                let y = self.pop();
-                self.push(Value::VBool(x == y));
             }
 
             Instr::Gt => {

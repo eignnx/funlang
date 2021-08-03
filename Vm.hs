@@ -197,7 +197,6 @@ stepVm instr = do
     Lir.Neg -> do
       i <- popInt
       push (Lir.VInt (-i))
-    Lir.Eq  -> stepSameTypeBoolBinOp (==)
     Lir.Gt  -> stepIntBoolBinOp (>)
     Lir.Lt  -> stepIntBoolBinOp (<)
     Lir.And -> stepBoolBinOp (&&)
@@ -259,9 +258,30 @@ callDirect fnAddr argC = do
 
 runIntrinsic :: Intr.Intrinsic -> VmProgram ()
 runIntrinsic op = case op of
-  Intr.Print -> do
-    x <- pop
-    lift $ Lir.displayValue x
+  Intr.EqInt -> do
+    x <- popInt
+    y <- popInt
+    push $ Lir.VBool $ x == y
+  Intr.EqBool -> do
+    x <- popBool
+    y <- popBool
+    push $ Lir.VBool $ x == y
+  Intr.EqText -> do
+    x <- popString
+    y <- popString
+    push $ Lir.VBool $ x == y
+  Intr.DbgInt -> do
+    x <- popInt
+    lift $ Lir.dbgValue $ Lir.VInt x
+  Intr.DbgBool -> do
+    x <- popBool
+    lift $ Lir.dbgValue $ Lir.VBool x
+  Intr.DbgText -> do
+    x <- popString
+    lift $ Lir.dbgValue $ Lir.VString x
+  Intr.Puts -> do
+    x <- popString
+    lift $ putStrLn x
   Intr.Here pos -> do
     lift $ putStrLn ("intr.here[] at " ++ show pos)
   Intr.Exit -> do

@@ -3,7 +3,7 @@ def loop-forever[] -> Never do
   loop do
     intr.here[];
   end
-  intr.print["Infinity: reached."];
+  intr.puts["Infinity: reached."];
 end
 
 def main[] do
@@ -18,7 +18,7 @@ end
 #       (loop (do
 #         (intr.here[] : Void);
 #       end : Void) : Never)
-#       (intr.print[("Infinity: reached." : Text)] : Void);
+#       (intr.puts[("Infinity: reached." : Text)] : Void);
 #     end : Never)
 #   Item([] -> Void):
 #     def main[] -> Void (do

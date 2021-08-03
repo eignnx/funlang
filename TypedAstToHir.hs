@@ -16,6 +16,7 @@ import qualified Hir
 import           Cata                         ( RecTyped(..) )
 import qualified Comptime
 import qualified Intr
+import Utils ( (+++), codeIdent )
 
 import           Control.Monad.State
 import           Data.Foldable
@@ -25,7 +26,7 @@ import           Debug.Trace                   ( trace )
 
 data CState = CState
   { lbl_  :: Hir.Lbl
-  , defs_ :: [(String, Hir.Value, [Hir.Instr])]
+  , defs_ :: [(String, Hir.Lbl, [Hir.Instr])]
   }
   deriving Show
 
@@ -37,26 +38,29 @@ fresh = do
   modify (\s -> s { lbl_ = lbl + 1 })
   return lbl
 
-defineFn :: String -> CompState [Hir.Instr] -> CompState Hir.Lbl
-defineFn name compilation = do
+declareFn :: String -> CompState ()
+declareFn name = do
   -- First bind the name to a fresh lbl, store it in definitions.
   lbl <- fresh
   defs <- gets defs_
-  modify $ \st -> st { defs_ = (name, Hir.VLbl lbl, []) : defs }
+  modify $ \st -> st { defs_ = (name, lbl, []) : defs }
 
+defineFn :: String -> CompState [Hir.Instr] -> CompState Hir.Lbl
+defineFn name compilation = do
+  lbl <- lookupFnLbl name
   -- Then compile body and update hir in definition.
   hir <- compilation
   defs <- gets defs_
-  let hir' = [Hir.Label lbl] ++ hir -- Label the function.
-  modify $ \st -> st { defs_ = (name, Hir.VLbl lbl, hir') : defs }
+  let hir' = Hir.Label lbl : hir -- Label the function.
+  modify $ \st -> st { defs_ = (name, lbl, hir') : defs }
   return lbl
 
-lookupFnLbl :: String -> CompState Hir.Value
+lookupFnLbl :: String -> CompState Hir.Lbl
 lookupFnLbl name = do
   defs <- gets defs_
   case find (\(n, _, _) -> n == name) defs of
-    Just (_, value, _) -> return value
-    Nothing -> error $ "Internal Compiler Error: Unknown fn binding `" ++ name ++ "`"
+    Just (_, lbl, _) -> return lbl
+    Nothing -> error $ "Internal Compiler Error: Unknown fn binding" +++ codeIdent name
 
 class Compile a where
   compile :: a -> CompState [Hir.Instr]
@@ -67,7 +71,7 @@ instance Compile a => Compile [a] where
     x'  <- compile x
     xs' <- compile xs
     return (x' ++ xs')
-  
+
 
 instance Compile Ast.ArithOp where
   compile op = return $ case op of
@@ -80,8 +84,8 @@ instance Compile Ast.OtherOp where
   compile Ast.Concat = return [Hir.Concat]
 
 instance Compile (Ast.Seq Ast.TypedExpr) where
-  
-  compile (Ast.Empty) = return []
+
+  compile Ast.Empty = return []
 
   compile (Ast.Result expr) = compile expr
 
@@ -104,8 +108,7 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.CallF (Ast.VarF name :<: f) args :<: resTy) = do
     args' <- compile args -- Using `instance Compile a => Compile [a]`
-    value <- lookupFnLbl name -- FIXME: Ensure this works when fn names are shadowed.
-    let Hir.VLbl lbl = value
+    lbl <- lookupFnLbl name -- FIXME: Ensure this works when fn names are shadowed.
     let argC = length args
     return $ args' -- Code to push the arguments
            ++ [Hir.CallDirect lbl argC]
@@ -128,9 +131,7 @@ instance Compile Ast.TypedExpr where
     -- NOTE: you gotta reverse these args below!
     return $ y' ++ x' ++ op'
 
-  compile (Ast.RetF expr :<: ty) = do
-    expr' <- compile expr
-    return expr'
+  compile (Ast.RetF expr :<: ty) = compile expr
 
   compile (Ast.CallF fn args :<: ty) = do
     args' <- compile args -- Using `instance Compile a => Compile [a]`
@@ -144,9 +145,9 @@ instance Compile Ast.TypedExpr where
   -- Intercept the call to deal with `Void` specially. https://pbs.twimg.com/media/EU0GDTVU4AY73KC?format=jpg&name=small
   compile intr@(Ast.IntrinsicF pos "print" [arg@(_ :<: Ty.VoidTy)] :<: ty) = do
     let intr = Intr.fromName "print" pos
-    return $  [ Hir.Const $ Hir.VString "<Void>"
-              , Hir.Intrinsic intr
-              ]
+    return [ Hir.Const $ Hir.VString "<Void>"
+           , Hir.Intrinsic intr
+           ]
 
   compile (Ast.IntrinsicF pos name args :<: ty) = do
     args' <- mapM compile args
@@ -158,9 +159,7 @@ instance Compile Ast.TypedExpr where
   compile (Ast.AnnF expr _ :<: ty)   = compile expr
 
   compile (Ast.LetF name expr@(_ :<: exprTy) :<: _)
-    | exprTy <: Ty.VoidTy = do
-      expr' <- compile expr
-      return $ expr'
+    | exprTy <: Ty.VoidTy = compile expr -- Still gotta run it cause it might have side-effects.
     | otherwise = do
       expr' <- compile expr
       return $ expr' ++ [Hir.Store name]
@@ -207,6 +206,13 @@ instance Compile Ast.TypedExpr where
       ++ [Hir.Jmp top]
 
   compile (Ast.ModF name items :<: ty) = do
+
+    -- First, declare all the sub-items so that they can be called in any order.
+    forM_ items $ \(itemF :<: _) -> do
+      let Just name = Ast.itemName itemF
+      declareFn name
+
+    -- Then run the actual compilation.
     forM_ items $ \item@(itemF :<: _) -> do
       if Ast.isModLevelItem itemF
         then compile item
@@ -261,27 +267,25 @@ instance Compile Ast.RelOp where
   compile op = return $ case op of
     Ast.Gt  -> [Hir.Gt]
     Ast.Lt  -> [Hir.Lt]
-    Ast.Eq  -> [Hir.Eq]
-    Ast.Neq -> [Hir.Eq, Hir.Not]
 
 initialCState = CState { lbl_ = Hir.Lbl 0, defs_ = [] }
 
 runCompilation :: Compile a => a -> ([Hir.Instr], CState)
 runCompilation ast = runState (compile ast) initialCState
 
-trampoline :: [(String, Hir.Value, [Hir.Instr])] -> [Hir.Instr]
+trampoline :: [(String, Hir.Lbl, [Hir.Instr])] -> [Hir.Instr]
 trampoline defs = entryPointJump ++ exit
   where
     exit = [Hir.Intrinsic Intr.Exit]
     entryPointJump = [Hir.CallDirect mainLbl 0]
       where
         mainLbl = case find (\(name, _, _) -> name == "main") defs of
-                    Just (_, Hir.VLbl lbl, _) -> lbl
+                    Just (_, lbl, _) -> lbl
                     Nothing -> error $ "Couldn't find `def main`!"
 
 
-joinDefs :: [(String, Hir.Value, [Hir.Instr])] -> [Hir.Instr]
-joinDefs defs = concat $ map (\(_, _, hir) -> hir) defs
+joinDefs :: [(String, Hir.Lbl, [Hir.Instr])] -> [Hir.Instr]
+joinDefs = concatMap (\(_, _, hir) -> hir)
 
 astToHir :: Compile a => a -> [Hir.Instr]
 astToHir ast = trampoline defs ++ joinDefs defs

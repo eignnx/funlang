@@ -44,7 +44,6 @@ fn decode_instr(segments: &[&str]) -> Instr {
         ["And"] => And,
         ["Or"] => Or,
         ["Not"] => Not,
-        ["Eq"] => Eq,
         ["Gt"] => Gt,
         ["Lt"] => Lt,
         ["Concat"] => Concat,
@@ -81,7 +80,6 @@ pub enum Instr {
     And,
     Or,
     Not,
-    Eq,
     Gt,
     Lt,
     Concat,
@@ -131,7 +129,13 @@ fn decode_value(segments: &[&str]) -> Value {
 
 #[derive(Debug)]
 pub enum Intrinsic {
-    Print,
+    EqInt,
+    EqBool,
+    EqText,
+    DbgInt,
+    DbgBool,
+    DbgText,
+    Puts,
     Here(String),
     Exit,
 }
@@ -139,7 +143,13 @@ pub enum Intrinsic {
 fn decode_intrinsic(segments: &[&str]) -> Intrinsic {
     use Intrinsic::*;
     match segments {
-        ["Print"] => Print,
+        ["EqInt"] => EqInt,
+        ["EqBool"] => EqBool,
+        ["EqText"] => EqText,
+        ["DbgInt"] => DbgInt,
+        ["DbgBool"] => DbgBool,
+        ["DbgText"] => DbgText,
+        ["Puts"] => Puts,
         ["Here", loc @ ..] => Here(loc.join(" ")),
         ["Exit"] => Exit,
         _ => panic!("Can't decode {:?} as an Intrinsic!", segments),

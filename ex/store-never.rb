@@ -6,5 +6,5 @@ end
 def main[] do
   let x = 1;
   x = text-disguised-as-never[];
-  intr.print[x];
+  intr.puts[x];
 end

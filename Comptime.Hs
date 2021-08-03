@@ -37,8 +37,6 @@ eval = cata \case
     Ast.BoolOp Ast.Xor     -> evalBoolBoolBinOp xor x y
     Ast.RelOp Ast.Gt       -> evalIntBoolBinOp (>) x y
     Ast.RelOp Ast.Lt       -> evalIntBoolBinOp (<) x y
-    Ast.RelOp Ast.Eq       -> evalValueBoolBinOp (==) x y
-    Ast.RelOp Ast.Neq      -> evalValueBoolBinOp (/=) x y
     Ast.OtherOp Ast.Concat -> evalTextTextBinOp (++) x y
 
   -- Ast.IfF r r r

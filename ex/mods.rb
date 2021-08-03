@@ -8,11 +8,11 @@ mod Foo
 end
 
 def main[] do
-  intr.print[foo[MySecondFavNum]];
+  intr.dbg-int[foo[MySecondFavNum]];
 
-  def blah[] = intr.print["blah"]
+  def blah[] = intr.puts["blah"]
 
-  intr.print["vvvvv  Expecting 'blah' here  vvvvv"];
+  intr.puts["vvvvv  Expecting 'blah' here  vvvvv"];
   blah[];
-  intr.print["^^^^^ Did 'blah' get printed? ^^^^^"]
+  intr.puts["^^^^^ Did 'blah' get printed? ^^^^^"]
 end

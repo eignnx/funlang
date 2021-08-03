@@ -116,25 +116,6 @@ class CheckType a where
   infer :: a -> TyChecker (Res (Checked a))
   check :: a -> Ty -> TyChecker (Res (Checked a))
 
-instance CheckType (Intr.Intrinsic, [Ast.TypedExpr]) where
-
-  type Checked (Intr.Intrinsic, [Ast.TypedExpr]) =
-    Ast.Typed (Intr.Intrinsic, [Ast.TypedExpr])
-
-  infer (Intr.Print, args@[_ :<: argTy]) = do
-    let printableTypes = [IntTy, BoolTy, TextTy, VoidTy]
-    return $
-      if any (argTy <:) printableTypes
-        then Ok ((Intr.Print, args) `HasTy` (argTy -&&> VoidTy))
-        else Err $ RootCause msg
-          where msg = "The `print` intrinsic cannot be applied to type" +++ code argTy
-
-  infer (Intr.Here pos, []) = return $ Ok $ (Intr.Here pos, []) `HasTy` VoidTy
-  infer (Intr.Exit, [])     = return $ Ok $ (Intr.Exit, []) `HasTy` NeverTy
-  infer (_, _)              = return $ Err $ RootCause "You passed the wrong number of arguments to an intrinsic"
-
-  check (_, [args]) = undefined
-
 instance CheckType (Ast.Seq Ast.Expr) where
 
   type Checked (Ast.Seq Ast.Expr) = (Ast.Seq Ast.TypedExpr, Ty)
@@ -224,10 +205,6 @@ instance CheckType Ast.Expr where
 
   infer (Ast.BinaryF op@(Ast.ArithOp _) e1 e2 :@: loc)          = inferBinOp op IntTy IntTy e1 e2
   infer (Ast.BinaryF op@(Ast.BoolOp  _) e1 e2 :@: loc)          = inferBinOp op BoolTy BoolTy e1 e2
-  infer (Ast.BinaryF op@(Ast.RelOp Ast.Eq) e1 e2 :@: loc)       = return $ Err $ RootCause msg
-    where msg = "I don't know how to infer the type of the `==` operator just yet. It's trickier than you'd think"
-  infer (Ast.BinaryF op@(Ast.RelOp Ast.Neq) e1 e2 :@: loc)      = return $ Err $ RootCause msg
-    where msg = "I don't know how to infer the type of the `!=` operator just yet. It's trickier than you'd think"
   infer (Ast.BinaryF op@(Ast.RelOp _) e1 e2 :@: loc)            = inferBinOp op IntTy BoolTy e1 e2
   infer (Ast.BinaryF op@(Ast.OtherOp Ast.Concat) e1 e2 :@: loc) = inferBinOp op TextTy TextTy e1 e2
 
@@ -280,16 +257,17 @@ instance CheckType Ast.Expr where
                 received = length args
 
   infer expr@(Ast.IntrinsicF place name args :@: loc) = do
+    let intr = Intr.fromName name place
+    let (expectedArgs, expectedRet) = Intr.sig intr
     argsRes <- sequenceA <$> mapM infer args
     case argsRes of
-      Ok args' -> do
-        intrRes <- infer (Intr.fromName name place, args')
-        case intrRes of
-          Ok (_ `HasTy` ty) -> do
-            let intr = Ast.IntrinsicF place name args'
-            return $ Ok (intr :<: ty)
-          Err err -> return $ Err err `addError` msg
-            where msg = "The intrinsic call" +++ code expr +++ "has a problem"
+      Ok args' | correctArity && correctArgTys -> do
+        return $ Ok $ Ast.IntrinsicF place name args' :<: expectedRet
+          where correctArity = length args' == length expectedArgs
+                correctArgTys = all (\(_ :<: ty1, ty2) -> ty1 <: ty2) (zip args' expectedArgs)
+      Ok _ -> do
+        return $ Err $ RootCause msg
+          where msg = "The arguments doesn't match for intrinsic" +++ codeIdent name
       Err err -> return $ Err err
 
   infer (Ast.LetF name expr :@: loc) = do
@@ -461,20 +439,6 @@ instance CheckType Ast.Expr where
   --   where msg = "I don't have enough information to infer the type of" +++ code expr
 
   check :: Ast.Expr -> Ty -> TyChecker (Res Ast.TypedExpr)
-
-  -- Check an equality/disequality expression: `e1 == e2` or `e1 != e2`
-  check (Ast.BinaryF (Ast.RelOp op) e1 e2 :@: loc) ty
-    | ty <: BoolTy && op `elem` [Ast.Eq, Ast.Neq] = do
-      res <- checkSameType e1 e2
-      case res of
-        Ok (e1', e2') -> do
-          let _ :<: ty1 = e1'
-          let _ :<: ty2 = e2'
-          let resTy = ty1 -&&> ty2 -&&> BoolTy
-          let expr = Ast.BinaryF (Ast.RelOp op) e1' e2'
-          return $ res *> Ok (expr :<: resTy)
-        Err err -> return $ Err err `addError` msg
-          where msg = "The arguments to the `==`/`!=` operator must have the same type, but they don't"
 
   -- An `if` expression has two sequentially-executed sub-expressions:
   --  1. The conditional expression, and

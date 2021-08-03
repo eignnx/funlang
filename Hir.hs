@@ -42,7 +42,6 @@ data Instr
   | And
   | Or
   | Not
-  | Eq
   | Gt
   | Lt
   | Concat

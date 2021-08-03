@@ -4,7 +4,7 @@ end
 
 def main[] do
   never-call-fn[];
-  intr.print["Done."];
+  intr.puts["Done."];
 end
 
 # ===TAST===
@@ -16,7 +16,7 @@ end
 #   Item([] -> Never):
 #     def main[] -> Void (do
 #       ((never-call-fn : [] -> Never)[] : Never);
-#       (intr.print[("Done." : Text)] : Void)
+#       (intr.puts[("Done." : Text)] : Void)
 #     end : Never)
 
 

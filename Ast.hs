@@ -115,8 +115,6 @@ data BoolOp
 data RelOp
   = Gt
   | Lt
-  | Eq
-  | Neq
   deriving (Show, Eq)
 
 data OtherOp
@@ -211,8 +209,6 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
     BoolOp Xor     -> show x +++ "xor" +++ show y
     RelOp Gt       -> show x +++ ">" +++ show y
     RelOp Lt       -> show x +++ "<" +++ show y
-    RelOp Eq       -> show x +++ "==" +++ show y
-    RelOp Neq      -> show x +++ "!=" +++ show y
     OtherOp Concat -> show x +++ "++" +++ show y
   show (BlockF Empty) = "do end"
   show (BlockF seq) = "do" ++ indent (show seq) ++ "\nend"

@@ -12,24 +12,6 @@ def never-binary[] -> Never do
   1 + intr.exit[];
 end
 
-# Operator `==` is kinda a special case.
-def never-eq[] -> Never do
-  if "blah" == intr.exit[] then
-    1
-  else
-    2
-  end
-end
-
-# Operator `!=` is kinda a special case.
-def never-neq[] -> Never do
-  if "blah" != intr.exit[] then
-    1
-  else
-    2
-  end
-end
-
 def foo[x: Int, y: Int, z: Int] do
 end
 
@@ -42,7 +24,7 @@ def never-call-fn[] -> Never do
 end
 
 def never-intr[] -> Never do
-  intr.print[intr.exit[]];
+  intr.puts[intr.exit[]];
 end
 
 def never-if-cond[] -> Never do

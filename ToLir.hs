@@ -54,7 +54,6 @@ translateInstr labels instr = case instr of
   Hir.And                 -> Lir.And
   Hir.Or                  -> Lir.Or
   Hir.Not                 -> Lir.Not
-  Hir.Eq                  -> Lir.Eq
   Hir.Gt                  -> Lir.Gt
   Hir.Lt                  -> Lir.Lt
   Hir.Concat              -> Lir.Concat

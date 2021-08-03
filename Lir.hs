@@ -3,7 +3,7 @@
 module Lir
   ( InstrAddr(..)
   , Value(..)
-  , displayValue
+  , dbgValue
   , Instr(..)
   )
 where
@@ -33,10 +33,10 @@ data Value
   | VInstrAddr InstrAddr
   deriving (Show, Eq)
 
-displayValue :: Value -> IO ()
-displayValue (VInt    x) = print x
-displayValue (VBool   x) = print x
-displayValue (VString x) = print x
+dbgValue :: Value -> IO ()
+dbgValue (VInt    x) = print x
+dbgValue (VBool   x) = print x
+dbgValue (VString x) = print x
 
 data Instr
   = Load String
@@ -55,7 +55,6 @@ data Instr
   | And
   | Or
   | Not
-  | Eq
   | Gt
   | Lt
   | Concat
@@ -85,7 +84,6 @@ instance Show Instr where
     And -> "And"
     Or -> "Or"
     Not -> "Not"
-    Eq -> "Eq"
     Gt -> "Gt"
     Lt -> "Lt"
     Concat -> "Concat"
