@@ -48,7 +48,7 @@ data Instr
   | Concat
   | Alloc Int -- `Alloc n` allocates a contiguous block of memory of size `n`.
   | MemWrite Int -- `MemWrite i` performs `(TOS+1)[i] = TOS`.
-  | MemRead Int -- `MemWrite i` performs `(TOS+1)[i] = TOS`.
+  | MemRead Int  -- `MemRead  i` performs `(TOS)[i]`.
   | Nop
   | JmpIfFalse Lbl
   | Jmp Lbl
