@@ -41,7 +41,7 @@ import qualified Data.Map                          as M
 -- [2]: https://mpickering.github.io/posts/2014-11-27-pain-free.html
 data ExprF r
   = VarF String
-  | LiteralF Lit
+  | LiteralF (Lit r)
   | UnaryF UnaryOp r
   | BinaryF BinOp r r
   | BlockF (Seq r)
@@ -121,16 +121,18 @@ data OtherOp
   = Concat
   deriving (Show)
 
-data Lit
+data Lit e
   = Bool Bool
   | Int Integer
   | String String
   | Unit
-  deriving (Show)
+  | Pair (e, e)
+  deriving (Show, Functor)
 
 data UnaryOp
   = Not
   | Neg
+  | TupleProj Integer -- Example: `x.0`
   deriving (Show)
 
 -- | Represends a `do ... end` block.
@@ -197,8 +199,10 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (LiteralF (Int x)) = show x
   show (LiteralF (Bool x)) = if x then "true" else "false"
   show (LiteralF (String x)) = show x
+  show (LiteralF (Pair (x, y))) = "(" ++ show x ++ "," +++ show y ++ ")"
   show (UnaryF Not x) = "not " ++ show x
   show (UnaryF Neg x) = "-(" ++ show x ++ ")"
+  show (UnaryF (TupleProj idx) x) = show x ++ "." ++ show idx
   show (BinaryF op x y) = case op of
     ArithOp Add    -> show x +++ "+" +++ show y
     ArithOp Sub    -> show x +++ "-" +++ show y

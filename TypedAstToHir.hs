@@ -117,7 +117,15 @@ instance Compile Ast.TypedExpr where
     | ty <: Ty.VoidTy = return []
     | otherwise = return [Hir.Load name]
 
-  compile (Ast.LiteralF lit   :<: ty) = return [Hir.Const (valueFromLit lit)]
+  compile (Ast.LiteralF lit :<: ty) =
+    case lit of
+      Ast.Int    x    -> return $ pure $ Hir.Const $ Hir.VInt $ fromIntegral x
+      Ast.Bool   x    -> return $ pure $ Hir.Const $ Hir.VBool x
+      Ast.String x    -> return $ pure $ Hir.Const $ Hir.VString x
+      Ast.Pair (a, b) -> do
+        a' <- compile a
+        b' <- compile b
+        return $ [Hir.Alloc 2] ++ a' ++ [Hir.MemWrite 0] ++ b' ++ [Hir.MemWrite 1]
 
   compile (Ast.UnaryF op expr :<: ty) = do
     expr' <- compile expr
@@ -234,11 +242,7 @@ instance Compile Ast.TypedExpr where
 instance Compile Ast.UnaryOp where
   compile Ast.Not = return [Hir.Not]
   compile Ast.Neg = return [Hir.Neg]
-
-valueFromLit :: Ast.Lit -> Hir.Value
-valueFromLit (Ast.Int    x) = Hir.VInt $ fromIntegral x
-valueFromLit (Ast.Bool   x) = Hir.VBool x
-valueFromLit (Ast.String x) = Hir.VString x
+  compile (Ast.TupleProj idx) = return [Hir.MemRead $ fromIntegral idx]
 
 instance Compile Ast.BinOp where
   compile (Ast.ArithOp   op) = compile op

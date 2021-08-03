@@ -57,6 +57,9 @@ translateInstr labels instr = case instr of
   Hir.Gt                  -> Lir.Gt
   Hir.Lt                  -> Lir.Lt
   Hir.Concat              -> Lir.Concat
+  Hir.Alloc      n        -> Lir.Alloc n
+  Hir.MemWrite   idx      -> Lir.MemWrite idx
+  Hir.MemRead    idx      -> Lir.MemRead idx
   Hir.Label      lbl      -> Lir.Nop -- Labels are translated to no-ops.
   Hir.JmpIfFalse lbl      -> Lir.JmpIfFalse $ translateLbl labels lbl
   Hir.Jmp        lbl      -> Lir.Jmp $ translateLbl labels lbl
@@ -80,3 +83,4 @@ translateValue labels = \case
   Hir.VBool x -> Lir.VBool x
   Hir.VString x -> Lir.VString x
   Hir.VLbl lbl -> Lir.VInstrAddr $ translateLbl labels lbl
+  Hir.VPtr idx -> Lir.VPtr idx

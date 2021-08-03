@@ -1,8 +1,29 @@
-use core::panic;
-use std::{collections::HashMap, io::{self, Write}};
+use std::{
+    collections::HashMap,
+    io::{self, Write}
+};
 
 use crate::instr::{Ident, Instr, InstrAddr, Intrinsic, Value};
 
+#[derive(Debug)]
+pub struct Heap {
+    mem: Vec<Value>,
+}
+
+impl Heap {
+    fn new() -> Self {
+        Self { mem: Vec::new() }
+    }
+
+    fn alloc(&mut self, slots: usize) -> usize {
+        let idx = self.mem.len();
+        // Extend and fill the new part with zeros.
+        self.mem.resize_with(self.mem.len() + slots, || Value::VInt(0));
+        idx
+    }
+}
+
+#[derive(Debug)]
 pub struct Vm {
     memory: Vec<HashMap<String, Value>>,
     stack: Vec<Value>,
@@ -55,6 +76,13 @@ impl Vm {
         match self.pop() {
             Value::VInstrAddr(x) => x,
             x => panic!("Expected VInstrAddr at TOS, got {:?}!", x),
+        }
+    }
+
+    fn pop_ptr(&mut self) -> usize {
+        match self.pop() {
+            Value::VPtr(x) => x,
+            x => panic!("Expected VPtr at TOS, got {:?}!", x),
         }
     }
 
@@ -144,7 +172,7 @@ impl Vm {
         self.push_new_frame();
     }
 
-    fn step(&mut self, code: &[Instr], debug: bool) {
+    fn step(&mut self, code: &[Instr], heap: &mut Heap, debug: bool) {
         let instr = &code[self.pc.0];
 
         if debug {
@@ -269,6 +297,31 @@ impl Vm {
                 self.push(Value::VString(x + &y));
             }
 
+            Instr::Alloc(n) => {
+                let idx = heap.alloc(*n);
+                self.push(Value::VPtr(idx));
+            }
+
+            // BEFORE:
+            // TOS -> [val: Value]
+            //        [buf_start: Value::VPtr]
+            //        [...]
+            // AFTER:
+            // TOS -> [buf_start: Value::VPtr]
+            //        [...]
+            Instr::MemWrite(offset) => {
+                let val = self.pop();
+                let buf_start = self.pop_ptr();
+                heap.mem[buf_start + offset] = val;
+                self.push(Value::VPtr(buf_start));
+            }
+
+            Instr::MemRead(offset) => {
+                let buf_start = self.pop_ptr();
+                let val = heap.mem[buf_start + offset].clone();
+                self.push(val);
+            }
+
             Instr::Nop => {}
 
             Instr::JmpIfFalse(InstrAddr(addr)) => {
@@ -322,8 +375,9 @@ impl Vm {
     }
 
     pub fn exec(&mut self, code: &[Instr], debug: bool) {
+        let mut heap = Heap::new();
         while self.running {
-            self.step(code, debug);
+            self.step(code, &mut heap, debug);
             self.incr_pc();
         }
     }

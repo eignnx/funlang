@@ -1,3 +1,5 @@
+#![feature(vec_spare_capacity, maybe_uninit_extra)]
+
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::{fs, io};

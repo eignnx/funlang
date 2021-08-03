@@ -192,16 +192,37 @@ instance CheckType Ast.Expr where
       Err err -> return $ Err err `addError` msg
         where msg = "I can't type check the variable at" +++ show loc
 
-  infer (Ast.LiteralF x :@: loc) = do
-    let lit = Ast.LiteralF x
-    return $ case x of
-      Ast.Unit     -> Ok $ lit :<: VoidTy
-      Ast.Bool _   -> Ok $ lit :<: BoolTy
-      Ast.Int _    -> Ok $ lit :<: IntTy
-      Ast.String _ -> Ok $ lit :<: TextTy
+  infer (Ast.LiteralF x :@: loc) =
+    case x of
+
+      Ast.Unit     -> return $ Ok $ Ast.LiteralF Ast.Unit :<: VoidTy
+
+      Ast.Bool b   -> return $ Ok $ Ast.LiteralF (Ast.Bool b) :<: BoolTy
+
+      Ast.Int i    -> return $ Ok $ Ast.LiteralF (Ast.Int i) :<: IntTy
+
+      Ast.String t -> return $ Ok $ Ast.LiteralF (Ast.String t) :<: TextTy
+
+      Ast.Pair (a, b) -> do
+        aRes <- infer a
+        bRes <- infer b
+        case (aRes, bRes) of
+          (Ok a'@(_ :<: aTy), Ok b'@(_ :<: bTy)) ->
+            return $ Ok $ Ast.LiteralF (Ast.Pair (a', b')) :<: TupleTy [aTy, bTy]
+          _ -> return $ aRes *> bRes
 
   infer (Ast.UnaryF op@Ast.Not expr :@: loc) = inferUnaryOp op BoolTy BoolTy expr
   infer (Ast.UnaryF op@Ast.Neg expr :@: loc) = inferUnaryOp op IntTy IntTy expr
+  infer e@(Ast.UnaryF (Ast.TupleProj idx) expr :@: loc) = do
+    exprRes <- infer expr
+    case exprRes of
+      Ok expr'@(_ :<: TupleTy tys)
+        | fromIntegral idx < length tys -> do
+          let ty = tys !! fromIntegral idx
+          return $ Ok $ Ast.UnaryF (Ast.TupleProj idx) expr' :<: ty
+        | otherwise -> return $ Err $ RootCause msg
+          where msg = "The tuple expression" +++ code expr +++ "has only" +++ show (length tys) +++ "components, so you can't project the component at index" +++ show idx
+      err -> return err
 
   infer (Ast.BinaryF op@(Ast.ArithOp _) e1 e2 :@: loc)          = inferBinOp op IntTy IntTy e1 e2
   infer (Ast.BinaryF op@(Ast.BoolOp  _) e1 e2 :@: loc)          = inferBinOp op BoolTy BoolTy e1 e2

@@ -76,6 +76,7 @@ parens = Token.parens lexer
 brackets = Token.brackets lexer
 braces = Token.braces lexer
 integer = Token.integer lexer
+natural = Token.natural lexer
 stringLiteral = Token.stringLiteral lexer
 identifier = Token.identifier lexer
 
@@ -130,7 +131,9 @@ defExpr = spanned do
   exprTail <|> blockTail
 
 ty :: Parser Ty.Ty
-ty = Ty.ValTy <$> identifier
+ty =  try (Ty.ValTy <$> identifier <*> brackets (sepEndBy ty comma))
+  <|> (Ty.ValTy <$> identifier <*> pure [])
+  <?> "Type"
 
 ifExpr :: Parser Ast.Expr
 ifExpr = spanned do
@@ -185,8 +188,8 @@ binaryOp op f = do
 
 operators :: [[Operator String () Data.Functor.Identity.Identity Ast.Expr]]
 operators =
-  [ [ Prefix (unaryOp (reservedOp "-") (Ast.UnaryF Ast.Neg)) 
-    , Prefix (unaryOp (reserved "not") (Ast.UnaryF Ast.Not))
+  [ [ Prefix  (unaryOp (reservedOp "-") (Ast.UnaryF Ast.Neg))
+    , Prefix  (unaryOp (reserved "not") (Ast.UnaryF Ast.Not))
     ]
   , [ Infix (binaryOp (reservedOp "*") (Ast.BinaryF (Ast.ArithOp Ast.Mul))) AssocLeft
     , Infix (binaryOp (reservedOp "/") (Ast.BinaryF (Ast.ArithOp Ast.Div))) AssocLeft
@@ -212,6 +215,7 @@ operators =
 term :: Parser Ast.Expr
 term =  try nestedCalls
     <|> try nestedAnn
+    <|> try nestedProj
     <|> termFirst
 
 -- my-func[x, y][1, 2][a, b, c]
@@ -230,9 +234,19 @@ nestedAnn = do
   start <- getPosition
   head <- termFirst
   allTys <- many1 ((,) <$> (colon *> ty) <*> getPosition)
-  return $ foldl (reducer start) head allTys -- Build up all the calls
+  return $ foldl (reducer start) head allTys -- Build up all the annotations
   where
     reducer start expr (ty, end) = Ast.AnnF expr ty :@: mkSpan start end
+
+-- x.1.4.0.2
+nestedProj :: Parser Ast.Expr
+nestedProj = do
+  start <- getPosition
+  head <- termFirst
+  allProjs <- many1 ((,) <$> (dot *> natural) <*> getPosition)
+  return $ foldl (reducer start) head allProjs -- Build up all the projections
+  where
+    reducer start expr (idx, end) = Ast.UnaryF (Ast.TupleProj idx) expr :@: mkSpan start end
 
 varExpr :: Parser Ast.Expr
 varExpr = spanned $ Ast.VarF <$> identifier
@@ -284,12 +298,16 @@ callExpr = spanned $ Ast.CallF <$> expression <*> arguments
 arguments :: Parser [Ast.Expr]
 arguments = brackets $ sepEndBy expression comma
 
-literal :: Parser Ast.Lit
-literal =
-  (Ast.Int <$> integer) <|> (Ast.Bool <$> boolean) <|> (Ast.String <$> stringLiteral)
+literal :: Parser (Ast.Lit Ast.Expr)
+literal =  (Ast.Int <$> integer)
+       <|> (Ast.Bool <$> boolean)
+       <|> (Ast.String <$> stringLiteral)
+       <|> (Ast.Pair <$> pair)
  where
   boolean =
     (reserved "true" >> return True) <|> (reserved "false" >> return False)
+  pair =
+    braces ((,) <$> expression <*> (comma *> expression))
 
 seqTerminatedBy :: Parser a -> Parser (Ast.Seq Ast.Expr)
 seqTerminatedBy end

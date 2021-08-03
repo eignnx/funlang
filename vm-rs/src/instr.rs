@@ -47,6 +47,9 @@ fn decode_instr(segments: &[&str]) -> Instr {
         ["Gt"] => Gt,
         ["Lt"] => Lt,
         ["Concat"] => Concat,
+        ["Alloc", n] => Alloc(n.parse().unwrap()),
+        ["MemWrite", idx] => MemWrite(idx.parse().unwrap()),
+        ["MemRead", idx] => MemRead(idx.parse().unwrap()),
         ["Nop"] => Nop,
         ["JmpIfFalse", addr] => JmpIfFalse(addr.parse().unwrap()),
         ["Jmp", addr] => Jmp(addr.parse().unwrap()),
@@ -83,6 +86,9 @@ pub enum Instr {
     Gt,
     Lt,
     Concat,
+    Alloc(usize),
+    MemWrite(usize),
+    MemRead(usize),
     Nop, // Used to replace labels
     JmpIfFalse(InstrAddr),
     Jmp(InstrAddr),
@@ -98,15 +104,18 @@ pub enum Value {
     VBool(bool),
     VString(String),
     VInstrAddr(InstrAddr),
+    VPtr(usize),
 }
 
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Value::*;
         match self {
-            Value::VInt(x) => write!(f, "{}", x),
-            Value::VBool(x) => write!(f, "{}", x),
-            Value::VString(x) => write!(f, "{}", x),
-            Value::VInstrAddr(x) => write!(f, "{}", x),
+            VInt(x) => write!(f, "{}", x),
+            VBool(x) => write!(f, "{}", x),
+            VString(x) => write!(f, "{:?}", x),
+            VInstrAddr(x) => write!(f, "@{}", x),
+            VPtr(x) => write!(f, "*{}", x),
         }
     }
 }
@@ -123,6 +132,7 @@ fn decode_value(segments: &[&str]) -> Value {
             VString(s)
         }
         ["VInstrAddr", a] => VInstrAddr(a.parse().unwrap()),
+        ["VPtr", p] => VPtr(p.parse().unwrap()),
         _ => panic!("Can't decode {:?} as a Value!", segments),
     }
 }

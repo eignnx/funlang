@@ -7,7 +7,7 @@ where
 
 import qualified Intr
 
-data Lbl = Lbl Int
+newtype Lbl = Lbl Int
   deriving (Show, Eq, Ord)
 
 instance Num Lbl where
@@ -23,6 +23,7 @@ data Value
   | VBool Bool
   | VString String
   | VLbl Lbl
+  | VPtr Int
   deriving (Show, Eq)
 
 data Instr
@@ -45,6 +46,9 @@ data Instr
   | Gt
   | Lt
   | Concat
+  | Alloc Int -- `Alloc n` allocates a contiguous block of memory of size `n`.
+  | MemWrite Int -- `MemWrite i` performs `(TOS+1)[i] = TOS`.
+  | MemRead Int -- `MemWrite i` performs `(TOS+1)[i] = TOS`.
   | Nop
   | JmpIfFalse Lbl
   | Jmp Lbl
