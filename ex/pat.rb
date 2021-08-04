@@ -1,7 +1,7 @@
 def main[] do
   let a = 1;
   let {b, c} = {true, 999};
-  let {w, {x}, {{y}, z}} = {0, 1, {{2}, 3}};
+  let {w, x, {{y}, z}} = {0, 1, {{2}, 3}};
   assert[w, 0, "w is wrong!"];
   assert[x, 1, "x is wrong!"];
   assert[y, 2, "y is wrong!"];
