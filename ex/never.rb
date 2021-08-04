@@ -1,4 +1,4 @@
-def loop-forever[] -> Never do
+def loop_forever[] -> Never do
   "pls pop me!";
   loop do
     intr.here[];
@@ -7,13 +7,13 @@ def loop-forever[] -> Never do
 end
 
 def main[] do
-  loop-forever[]
+  loop_forever[]
 end
 
 # ===TAST===
-# Mod({ loop-forever: [] -> Never, main: [] -> Void }):
+# Mod({ loop_forever: [] -> Never, main: [] -> Void }):
 #   Item([] -> Never):
-#     def loop-forever[] -> Void (do
+#     def loop_forever[] -> Void (do
 #       ("pls pop me!" : Text);
 #       (loop (do
 #         (intr.here[] : Void);
@@ -22,7 +22,7 @@ end
 #     end : Never)
 #   Item([] -> Void):
 #     def main[] -> Void (do
-#       ((loop-forever : [] -> Void)[] : Void)
+#       ((loop_forever : [] -> Void)[] : Void)
 #     end : Void)
 
 
@@ -30,7 +30,7 @@ end
 # Const (VLbl (Lbl 2))
 # Store "main"
 # Const (VLbl (Lbl 0))
-# Store "loop-forever"
+# Store "loop_forever"
 # Const (VLbl (Lbl 2))
 # Call 0
 # Intrinsic Exit
@@ -44,7 +44,7 @@ end
 # Intrinsic Print
 # Ret
 # Label (Lbl 2)
-# Load "loop-forever"
+# Load "loop_forever"
 # Call 0
 # Ret
 

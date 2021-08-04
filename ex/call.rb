@@ -1,4 +1,4 @@
-def str-join[a: Text, b: Text] -> Text do
+def str_join[a: Text, b: Text] -> Text do
   ret id[a ++ b]
 end
 

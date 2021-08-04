@@ -29,7 +29,7 @@ languageDef = emptyDef
   , Token.commentLine     = "#"
   , Token.nestedComments  = True
   , Token.identStart      = letter
-  , Token.identLetter     = alphaNum <|> oneOf "-"
+  , Token.identLetter     = alphaNum <|> oneOf "_"
   , Token.reservedNames   = [ "mod"
                             , "def"
                             , "let"

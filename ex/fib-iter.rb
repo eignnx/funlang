@@ -15,6 +15,6 @@ end
 def main[] do
   let n = 20;
   intr.puts["Working..."];
-  intr.dbg-int[fib[n]];
+  intr.dbg_int[fib[n]];
   intr.puts["Done!"];
 end

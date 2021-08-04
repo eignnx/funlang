@@ -1,10 +1,10 @@
 def main[] do
-  let p = mk-pair[123, "abc"];
-  intr.dbg-int[p.0];
-  intr.dbg-text[p.1.2];
+  let p = mk_pair[123, "abc"];
+  intr.dbg_int[p.0];
+  intr.dbg_text[p.1.2];
 end
 
-def mk-pair[a: Int, b: Text] -> Tuple[Int, Tuple[Int, Bool, Text]] do
+def mk_pair[a: Int, b: Text] -> Tuple[Int, Tuple[Int, Bool, Text]] do
   {a, {a, false, b}}
 end
 

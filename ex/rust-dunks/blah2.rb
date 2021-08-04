@@ -1,4 +1,4 @@
-def takes-a-never-like-no-prahblem[] -> Never do
+def takes_a_never_like_no_prahblem[] -> Never do
   if loop do end then
     nop
   else
@@ -6,7 +6,7 @@ def takes-a-never-like-no-prahblem[] -> Never do
   end; # <- semicolon: A-OK
 end
 
-def stop-it-patrick-your-scaring-him[] -> Never do
+def stop_it_patrick_your_scaring_him[] -> Never do
   if loop do end then
     nop
   else

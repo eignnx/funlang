@@ -1,6 +1,6 @@
 def f[] do
   let continue = true;
-  while intr.eq-bool[continue, true] do
+  while intr.eq_bool[continue, true] do
     "in f";
     continue = false;
   end

@@ -1,10 +1,10 @@
 def main[] do
-  let greeting = greet-digger["Digger"];
+  let greeting = greet_digger["Digger"];
   intr.puts[greeting];
 end
 
-def greet-digger[name: Text] -> Text do
-  if intr.eq-text[name, "Digger"] then
+def greet_digger[name: Text] -> Text do
+  if intr.eq_text[name, "Digger"] then
     "You're a good doggy!"
   else
     "Who are you?"

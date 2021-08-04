@@ -10,7 +10,7 @@ def fact[n: Int] =
   end
 
 def main[] do
-  intr.dbg-int[fact[10]];
+  intr.dbg_int[fact[10]];
 end
 
 # The problem is that function definitions without an explicit return type are

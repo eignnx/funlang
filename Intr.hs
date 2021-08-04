@@ -25,12 +25,12 @@ data Intrinsic
 
 fromName :: String -> Parsec.SourcePos -> Intrinsic
 fromName name pos = case name of
-  "eq-int"   -> EqInt
-  "eq-bool"  -> EqBool
-  "eq-text"  -> EqText
-  "dbg-int"  -> DbgInt
-  "dbg-bool" -> DbgBool
-  "dbg-text" -> DbgText
+  "eq_int"   -> EqInt
+  "eq_bool"  -> EqBool
+  "eq_text"  -> EqText
+  "dbg_int"  -> DbgInt
+  "dbg_bool" -> DbgBool
+  "dbg_text" -> DbgText
   "puts"     -> Puts
   "here"     -> Here pos
   "exit"     -> Exit

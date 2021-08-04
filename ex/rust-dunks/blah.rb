@@ -1,21 +1,21 @@
-def never-call-fn[] -> Never do
+def never_call_fn[] -> Never do
   (loop do end)[1, 2, 3];
 end
 
 def main[] do
-  never-call-fn[];
+  never_call_fn[];
   intr.puts["Done."];
 end
 
 # ===TAST===
 # Mod({ main: [] -> Never, never-call-fn: [] -> Never }):
 #   Item([] -> Never):
-#     def never-call-fn[] -> Never (do
+#     def never_call_fn[] -> Never (do
 #       ((loop (do end : Void) : Never)[(1 : Int),(2 : Int),(3 : Int)] : Never)
 #     end : Never)
 #   Item([] -> Never):
 #     def main[] -> Void (do
-#       ((never-call-fn : [] -> Never)[] : Never);
+#       ((never_call_fn : [] -> Never)[] : Never);
 #       (intr.puts[("Done." : Text)] : Void)
 #     end : Never)
 
@@ -24,7 +24,7 @@ end
 # Const (VLbl (Lbl 2))
 # Store "main"
 # Const (VLbl (Lbl 0))
-# Store "never-call-fn"
+# Store "never_call_fn"
 # Const (VLbl (Lbl 2))
 # Call 0
 # Intrinsic Exit
@@ -37,7 +37,7 @@ end
 # Call 3
 # Ret
 # Label (Lbl 2)
-# Load "never-call-fn"
+# Load "never_call_fn"
 # Call 0
 # Const (VText "Done.")
 # Intrinsic Print
@@ -48,7 +48,7 @@ end
 #   0: Const (VInstrAddr (InstrAddr 15))
 #   1: Store "main"
 #   2: Const (VInstrAddr (InstrAddr 7))
-#   3: Store "never-call-fn"
+#   3: Store "never_call_fn"
 #   4: Const (VInstrAddr (InstrAddr 15))
 #   5: Call 0
 #   6: Intrinsic Exit
@@ -61,7 +61,7 @@ end
 #  13: Call 3
 #  14: Ret
 #  15: Nop
-#  16: Load "never-call-fn"
+#  16: Load "never_call_fn"
 #  17: Call 0
 #  18: Const (VText "Done.")
 #  19: Intrinsic Pr
