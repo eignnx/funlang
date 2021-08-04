@@ -99,7 +99,7 @@ instance Compile (Ast.Seq Ast.TypedExpr) where
       seq' <- compile seq
       let maybePop = if ty <: Ty.VoidTy || Ast.isModLevelItem exprF
                       then []
-                      else trace (">>>>>>>>>>>>>>>>>>>>>>>>Adding pop after: " ++ show expr) [Hir.Pop]
+                      else [Hir.Pop]
       return $ expr' ++ maybePop ++ seq'
 
 instance Compile Ast.TypedExpr where
