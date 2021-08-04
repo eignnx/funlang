@@ -378,12 +378,10 @@ instance CheckType Ast.Expr where
     condRes <- check cond BoolTy
     bodyRes <- checkSameType yes no
     case (condRes, bodyRes) of
-      (Ok cond', Ok (yes', no')) -> do
+      (Ok cond', Ok (yes', no', bodyTy)) -> do
         let _ :<: condTy = cond'
-        let _ :<: yesTy = yes'
-        let _ :<: noTy = no'
         let ifExpr = Ast.IfF cond' yes' no'
-        return $ Ok $ ifExpr :<: (condTy -&&> (yesTy >||< noTy))
+        return $ Ok $ ifExpr :<: (condTy -&&> bodyTy)
       (_, Err err) -> return $ condRes *> (Err err `addError` msg)
         where msg = "The two branches of this `if` expression have different types"
       _ -> return $ condRes <* bodyRes
@@ -496,14 +494,16 @@ instance CheckType Ast.Expr where
     yesRes <- check yes ty
     noRes <- check no ty
     case (condRes, yesRes, noRes) of
-      (Ok cond'@(_ :<: condTy), Ok yes', Ok no') -> do
+      (Ok cond'@(_ :<: condTy), Ok (yes', _), Ok (no', _)) -> do
         let ifExpr = Ast.IfF cond' yes' no'
         return $ Ok (ifExpr :<: (condTy -&&> ty))
       (condErr@(Err _), yesRes, noRes) ->
         return (condErr' <* yesRes <* noRes)
           where condErr' = condErr `addError` msg
                 msg = "The condition of an `if` must have type" +++ code BoolTy ++ ", but this one doesn't"
-      (_, yesRes, noRes) -> return (yesRes *> noRes)
+      (_, Err yesErr, Err noErr) -> return $ Err yesErr *> Err noErr
+      (_, _, Err noErr) -> return $ Err noErr
+      (_, Err yesErr, _) -> return $ Err yesErr
 
 --   -- check ctx fn@(FnExpr param body) (FnTy paramTy retTy) =
 --   --   let pName = paramName param
@@ -533,18 +533,19 @@ instance CheckType Ast.Expr where
     else
       return $ Err $ RootCause ("A let declaration has type" +++ code VoidTy)
 
-  check (Ast.AssignF name expr :@: loc) ty = if ty == VoidTy then do
-                                               nameRes <- varLookup name
-                                               case nameRes of
-                                                 Ok varTy -> do
-                                                   res <- check expr varTy
-                                                   return $ rebuild <$> res
-                                                     where rebuild expr'@(_ :<: exprTy) =
-                                                             Ast.AssignF name expr' :<: (exprTy -&&> VoidTy)
-                                                 Err err -> return (Err err `addError` msg)
-                                                   where msg = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
-                                             else
-                                               return $ Err $ RootCause ("Assignments have type" +++ code VoidTy)
+  check (Ast.AssignF name expr :@: loc) ty
+    | ty <: VoidTy = do
+      nameRes <- varLookup name
+      case nameRes of
+        Ok varTy -> do
+          res <- check expr varTy
+          return $ rebuild <$> res
+            where rebuild expr'@(_ :<: exprTy) =
+                    Ast.AssignF name expr' :<: (exprTy -&&> VoidTy)
+        Err err -> return (Err err `addError` msg)
+          where msg = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
+    | otherwise =
+        return $ Err $ RootCause ("Assignments have type" +++ code VoidTy)
 
   check (Ast.LetConstF name expr :@: loc) ty =
     if ty <: VoidTy then do
@@ -604,27 +605,20 @@ instance CheckType Ast.Expr where
       err -> err `addError` msg
         where msg = "The expression" +++ code expr +++ "doesn't typecheck"
 
-checkSameType :: Ast.Expr -> Ast.Expr
-              -> TyChecker (Res (Ast.TypedExpr, Ast.TypedExpr))
+checkSameType :: Ast.Seq Ast.Expr -> Ast.Seq Ast.Expr
+              -> TyChecker (Res (Ast.Seq Ast.TypedExpr, Ast.Seq Ast.TypedExpr, Ty))
 checkSameType e1 e2 = do
   e1Res <- infer e1
-  case e1Res of
-    Ok e1'@(_ :<: ty1) -> do
-      e2Res <- check e2 ty1 -- Both args must be of same type.
-      case e2Res of
-        Ok e2' -> return $ Ok (e1', e2')
-        Err err -> return $ Err err `addError` msg
-          where msg = "Both" +++ code e1 +++ "and" +++ code e2 +++ "must have the same type, but they don't"
-    Err err -> do -- If we CAN'T infer e1, let's see if we can infer e2.
-      e2Res <- infer e2
-      case e2Res of
-        Ok e2'@(_ :<: ty2) -> do
-          e1CheckRes <- check e1 ty2
-          case e1CheckRes of
-            Ok e1' -> return $ Ok (e1', e2')
-            Err err -> return $ Err err
-        Err err -> return $ Err err `addError` msg
-          where msg = "I can't infer the type of" +++ code e1 +++ "or of" +++ code e2
+  e2Res <- infer e2
+  case (e1Res, e2Res) of
+    (Ok (e1', t1), Ok (e2', t2))
+      | t1 <: t2 || t2 <: t1 -> return $ Ok (e1', e2', t1 >||< t2)
+      | otherwise -> return $ Err $ RootCause msg
+        where msg = "The types" +++ code t1 +++ "and" +++ code t2 +++ "can't be joined"
+    (Err err1, Err err2) -> return $ Err err1 *> Err err2
+    (Ok _, Err err) -> return $ Err err
+    (Err err, Ok _) -> return $ Err err
+
 
 astToTypedAst :: CheckType a => a -> Res (Checked a)
 astToTypedAst ast = evalState (infer ast) initState

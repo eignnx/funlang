@@ -140,9 +140,9 @@ ifExpr = spanned do
   reserved "if"
   cond <- expression
   reserved "then"
-  yesBody <- expression
+  yesBody <- seqTerminatedBy (reserved "else")
   reserved "else"
-  noBody <- expression
+  noBody <- seqTerminatedBy (reserved "end")
   reserved "end"
   return $ Ast.IfF cond yesBody noBody
 

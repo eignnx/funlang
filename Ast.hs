@@ -52,7 +52,7 @@ data ExprF r
   | AssignF String r
   | LetConstF String r
   | RetF r
-  | IfF r r r
+  | IfF r (Seq r) (Seq r)
   | WhileF r r
   | LoopF r
   | NopF

@@ -10,12 +10,12 @@ def main[] do
 end
 
 def assert[expected: Int, actual: Int, msg: Text] do
-  if intr.eq-int[expected, actual] then
-    nop
+  if not intr.eq-int[expected, actual] then
+    intr.puts[msg];
+    intr.exit[];
   else
-    do
-      intr.puts[msg];
-      intr.exit[];
-    end
+    nop;
+    nop;
+    nop
   end
 end
