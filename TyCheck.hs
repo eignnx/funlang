@@ -63,7 +63,7 @@ data Error
 instance Show Error where
   show (RootCause explanation) = explanation ++ "."
   show (ResultingError extraInfo e) = extraInfo +++ "because..." ++ indent (show e)
-  show (MultiError e1 e2) = show e1 ++ "\n\nAlso..." ++ indent (show e2)
+  show (MultiError e1 e2) = show e1 ++ "\n\nAlso...\n\n" ++ show e2
 
 instance Semigroup Error where
   e1 <> e2 = MultiError e1 e2
