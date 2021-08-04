@@ -8,11 +8,13 @@ module Utils
   )
 where
 
-import Data.List ( isPrefixOf )
+import Data.List ( isPrefixOf, isSuffixOf )
 import Text.Parsec.Pos ( SourcePos, sourceName, sourceLine, sourceColumn )
 
 (+++) :: String -> String -> String
-a +++ b = a ++ " " ++ b
+a +++ b
+  | "\n" `isSuffixOf` a = a ++ b
+  | otherwise = a ++ " " ++ b
 
 code :: Show a => a -> String
 code a = let
@@ -26,10 +28,10 @@ codeIdent a = "`" ++ a ++ "`"
 
 indent :: String -> String
 indent txt = replace "\n" "\n  " ("\n" ++ txt)
-  where 
+  where
     -- From: https://programming-idioms.org/idiom/63/replace-fragment-of-a-string/976/haskell
     replace _ _ [] = []
-    replace from to input = if isPrefixOf from input
+    replace from to input = if from `isPrefixOf` input
       then to ++ replace from to (drop (length from) input)
       else head input : replace from to (tail input)
 
