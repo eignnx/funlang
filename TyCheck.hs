@@ -303,8 +303,10 @@ instance CheckType Ast.Expr where
       err -> return err
     where
       checkArgs :: [Ty] -> TyChecker (Res [Ast.TypedExpr])
-      checkArgs argTys | length args == length argTys = sequenceA <$> zipWithM check args argTys -- Check that the args have right types.
-      checkArgs argTys = return $ Err $ RootCause msg
+      checkArgs argTys
+        | length args == length argTys =
+          sequenceA <$> zipWithM check args argTys -- Check that the args have right types.
+        | otherwise = return $ Err $ RootCause msg
           where msg = "Oops! You passed" +++ show received +++ "arguments to"
                     +++ code fn ++ ", but it expects" +++ show expected
                 expected = length argTys
