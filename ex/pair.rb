@@ -9,7 +9,7 @@ def mk-pair[a: Int, b: Text] -> Tuple[Int, Tuple[Int, Bool, Text]] do
 end
 
 # ===LIR===
-#   0: CallDirect 11 0
+#   0: CallDirect 17 0
 #   1: Intrinsic Exit
 #   2: Nop
 #   3: Store b
@@ -17,18 +17,25 @@ end
 #   5: Alloc 2
 #   6: Load a
 #   7: MemWriteDirect 0
-#   8: Load b
-#   9: MemWriteDirect 1
-#  10: Ret
-#  11: Nop
-#  12: Const VInt 123
-#  13: Const VText "abc"
-#  14: CallDirect 2 2
-#  15: Store p
-#  16: Load p
-#  17: MemReadDirect 0
-#  18: Intrinsic DbgInt
-#  19: Load p
-#  20: MemReadDirect 1
-#  21: Intrinsic DbgText
-#  22: Ret
+#   8: Alloc 3
+#   9: Load a
+#  10: MemWriteDirect 0
+#  11: Const VBool False
+#  12: MemWriteDirect 1
+#  13: Load b
+#  14: MemWriteDirect 2
+#  15: MemWriteDirect 1
+#  16: Ret
+#  17: Nop
+#  18: Const VInt 123
+#  19: Const VText "abc"
+#  20: CallDirect 2 2
+#  21: Store p
+#  22: Load p
+#  23: MemReadDirect 0
+#  24: Intrinsic DbgInt
+#  25: Load p
+#  26: MemReadDirect 1
+#  27: MemReadDirect 2
+#  28: Intrinsic DbgText
+#  29: Ret
