@@ -5,7 +5,7 @@
 # has type `Never.`
 
 def never_unary[] -> Never do
-  not intr.exit[];
+  (not (intr.exit[] : Never)) : Never;
 end
 
 def never_binary[] -> Never do

@@ -54,6 +54,7 @@ pattern TupleTy ts  = ValTy "Tuple" ts
 --   `Never`, and it appears BEFORE the expression `1`. Therefore, the entire
 --   block should have type `Never`.
 (-&&>) :: Ty -> Ty -> Ty
+NeverTy -&&> _ = NeverTy
 _ -&&> ty = ty
 
 -- | This operator is used to join the types of two branches. It is always the

@@ -26,6 +26,7 @@ import           Data.Semigroup
 import           Control.Monad.State
 import           Control.Applicative
 import           Data.Maybe    ( isJust, fromMaybe )
+import GHCi.Message (Msg(Msg))
 
 data Res a
   = Ok a
@@ -111,6 +112,15 @@ getFnRetTy = do
     Just ty -> return ty
     Nothing -> error "Internal Compiler Error: couldn't find `#ret` in `ctx`!"
 
+-- | Takes a Foldable sequence of typed exprs and merges their types via `-&&>`.
+--   Example:
+--     operationalArgsType [a :<: IntTy, b :<: NeverTy, c :<: IntTy] == NeverTy
+--     operationalArgsType [a :<: IntTy, b :<: BoolTy] == BoolTy
+--     operationalArgsType [] == VoidTy
+operationalArgsType :: Foldable t => t (RecTyped f) -> Ty
+operationalArgsType = foldr ((-&&>) . getTy) VoidTy
+  where getTy (_ :<: ty) = ty
+
 class CheckType a where
   type Checked a :: *
   infer :: a -> TyChecker (Res (Checked a))
@@ -134,7 +144,7 @@ instance CheckType Ast.Pat where
         Err err -> return $ Err err
     | otherwise = return $ Err $ RootCause msg
       where msg = "The pattern" +++ code pat +++ "can't be bound to a tuple that has" +++ show (length ts) +++ "elements"
-    
+
   check pat@(Ast.TuplePat ps) nonTupleTy =
     return $ Err $ RootCause msg
       where msg = "The tuple pattern" +++ code pat +++ "can't be bound to something of type" ++ code nonTupleTy
@@ -279,8 +289,8 @@ instance CheckType Ast.Expr where
         case argsRes of
           Ok args' -> do
             let call = Ast.CallF fn' args'
-            let argsExeTy = foldr ((-&&>) . (\(_ :<: ty) -> ty)) VoidTy args'
-            return $ Ok (call :<: (argsExeTy -&&> retTy))
+            let ty = operationalArgsType args' -&&> retTy
+            return $ Ok (call :<: ty)
           Err err -> return $ Err err `addError` msg
             where msg = "I can't type check the function call at" +++ show loc
       Ok fn'@(_ :<: NeverTy) -> do
@@ -306,7 +316,8 @@ instance CheckType Ast.Expr where
     argsRes <- sequenceA <$> mapM infer args
     case argsRes of
       Ok args' | correctArity && correctArgTys -> do
-        return $ Ok $ Ast.IntrinsicF place name args' :<: expectedRet
+        let ty = operationalArgsType args' -&&> expectedRet
+        return $ Ok $ Ast.IntrinsicF place name args' :<: ty
           where correctArity = length args' == length expectedArgs
                 correctArgTys = all (\(_ :<: ty1, ty2) -> ty1 <: ty2) (zip args' expectedArgs)
       Ok _ -> do
@@ -429,7 +440,8 @@ instance CheckType Ast.Expr where
         define name $ FnTy paramTys bodyTy -- We MUST save the full type now.
         let def = Ast.DefF name params (Just retTy) typedBody
         return $ Ok (def :<: VoidTy)
-      Err err -> return $ Err err
+      Err err -> return $ Err err `addError` msg
+        where msg = "The body of function" +++ codeIdent name +++ "doesn't type check"
 
   -- For when the return type is NOT specified.
   infer (Ast.DefF name params Nothing body :@: loc) = do
@@ -440,10 +452,11 @@ instance CheckType Ast.Expr where
     put st -- Restore old ctx
     case bodyRes of
       Ok typedBody@(_ :<: bodyTy) -> do
-        let def = Ast.DefF name params (Just bodyTy) typedBody
         define name $ FnTy paramTys bodyTy -- We MUST save the full type now.
+        let def = Ast.DefF name params (Just bodyTy) typedBody
         return $ Ok (def :<: VoidTy)
-      Err err -> return $ Err err
+      Err err -> return $ Err err `addError` msg
+        where msg = "The body of function" +++ codeIdent name +++ "doesn't type check"
 
   infer (Ast.ModF name items :@: loc) = do
     res <- skimItemDefs -- First, we need to put all top-level definitions into the Ctx.
@@ -596,6 +609,7 @@ instance CheckType Ast.Expr where
 
   -- Default case.
   check expr ty = do
+    -- Switch from checking to inferring.
     exprRes <- infer expr
     return $ case exprRes of
       Ok expr'@(_ :<: exprTy)
