@@ -144,7 +144,12 @@ data UnaryOp
   = Not
   | Neg
   | TupleProj Integer -- Example: `x.0`
-  deriving (Show)
+
+instance Show UnaryOp where
+  show = \case
+    Not -> "not"
+    Neg -> "-(...)"
+    TupleProj idx -> "(...)." ++ show idx
 
 -- | Represends a `do ... end` block.
 --   The block:
