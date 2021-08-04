@@ -126,7 +126,7 @@ data Lit e
   | Int Integer
   | Text String
   | Unit
-  | Pair (e, e)
+  | Tuple [e]
   deriving (Show, Functor)
 
 data UnaryOp
@@ -199,7 +199,7 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (LiteralF (Int x)) = show x
   show (LiteralF (Bool x)) = if x then "true" else "false"
   show (LiteralF (Text x)) = show x
-  show (LiteralF (Pair (x, y))) = "(" ++ show x ++ "," +++ show y ++ ")"
+  show (LiteralF (Tuple xs)) = "{" ++ intercalate ", " (map show xs) ++ "}"
   show (UnaryF Not x) = "not " ++ show x
   show (UnaryF Neg x) = "-(" ++ show x ++ ")"
   show (UnaryF (TupleProj idx) x) = show x ++ "." ++ show idx

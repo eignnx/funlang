@@ -203,13 +203,13 @@ instance CheckType Ast.Expr where
 
       Ast.Text t -> return $ Ok $ Ast.LiteralF (Ast.Text t) :<: TextTy
 
-      Ast.Pair (a, b) -> do
-        aRes <- infer a
-        bRes <- infer b
-        case (aRes, bRes) of
-          (Ok a'@(_ :<: aTy), Ok b'@(_ :<: bTy)) ->
-            return $ Ok $ Ast.LiteralF (Ast.Pair (a', b')) :<: TupleTy [aTy, bTy]
-          _ -> return $ aRes *> bRes
+      Ast.Tuple exprs -> do
+        exprsRes <- sequenceA <$> mapM infer exprs
+        case exprsRes of
+          Ok exprs' -> do
+            let exprTys = map (\(_ :<: ty) -> ty) exprs'
+            return $ Ok $ Ast.LiteralF (Ast.Tuple exprs') :<: TupleTy exprTys
+          Err err -> return $ Err err
 
   infer (Ast.UnaryF op@Ast.Not expr :@: loc) = inferUnaryOp op BoolTy BoolTy expr
   infer (Ast.UnaryF op@Ast.Neg expr :@: loc) = inferUnaryOp op IntTy IntTy expr

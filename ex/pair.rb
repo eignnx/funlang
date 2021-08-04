@@ -1,11 +1,11 @@
 def main[] do
   let p = mk-pair[123, "abc"];
   intr.dbg-int[p.0];
-  intr.dbg-text[p.1];
+  intr.dbg-text[p.1.2];
 end
 
-def mk-pair[a: Int, b: Text] -> Tuple[Int, Text] do
-  {a, b}
+def mk-pair[a: Int, b: Text] -> Tuple[Int, Tuple[Int, Bool, Text]] do
+  {a, {a, false, b}}
 end
 
 # ===LIR===

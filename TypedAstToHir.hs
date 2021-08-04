@@ -119,13 +119,25 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.LiteralF lit :<: ty) =
     case lit of
-      Ast.Int  x -> return $ pure $ Hir.Const $ Hir.VInt $ fromIntegral x
-      Ast.Bool x -> return $ pure $ Hir.Const $ Hir.VBool x
-      Ast.Text x -> return $ pure $ Hir.Const $ Hir.VText x
-      Ast.Pair (a, b) -> do
-        a' <- compile a
-        b' <- compile b
-        return $ [Hir.Alloc 2] ++ a' ++ [Hir.MemWriteDirect 0] ++ b' ++ [Hir.MemWriteDirect 1]
+
+      Ast.Int  x ->
+        return $ pure $ Hir.Const $ Hir.VInt $ fromIntegral x
+
+      Ast.Bool x ->
+        return $ pure $ Hir.Const $ Hir.VBool x
+
+      Ast.Text x ->
+        return $ pure $ Hir.Const $ Hir.VText x
+
+      Ast.Tuple exprs -> do
+        exprs' <- mapM compile exprs
+        return $ allocation : writes exprs'
+        where
+          allocation = Hir.Alloc (length exprs)
+          writes :: [[Hir.Instr]] -> [Hir.Instr]
+          writes es = concat $ zipWith addWrite es [0..]
+          addWrite :: [Hir.Instr] -> Int -> [Hir.Instr]
+          addWrite hir idx = hir ++ [Hir.MemWriteDirect idx]
 
   compile (Ast.UnaryF op expr :<: ty) = do
     expr' <- compile expr

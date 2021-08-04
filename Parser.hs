@@ -302,12 +302,11 @@ literal :: Parser (Ast.Lit Ast.Expr)
 literal =  (Ast.Int <$> integer)
        <|> (Ast.Bool <$> boolean)
        <|> (Ast.Text <$> stringLiteral)
-       <|> (Ast.Pair <$> pair)
+       <|> (Ast.Tuple <$> tuple)
  where
-  boolean =
-    (reserved "true" >> return True) <|> (reserved "false" >> return False)
-  pair =
-    braces ((,) <$> expression <*> (comma *> expression))
+  boolean =  (reserved "true" >> return True)
+         <|> (reserved "false" >> return False)
+  tuple = braces $ sepEndBy expression comma
 
 seqTerminatedBy :: Parser a -> Parser (Ast.Seq Ast.Expr)
 seqTerminatedBy end
