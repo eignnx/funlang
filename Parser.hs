@@ -133,7 +133,7 @@ defExpr = spanned do
 ty :: Parser Ty.Ty
 ty =  try (Ty.ValTy <$> identifier <*> brackets (sepEndBy ty comma))
   <|> (Ty.ValTy <$> identifier <*> pure [])
-  <?> "Type"
+  <?> "type"
 
 ifExpr :: Parser Ast.Expr
 ifExpr = spanned do
@@ -163,7 +163,7 @@ nopExpr :: Parser Ast.Expr
 nopExpr = spanned $ reserved "nop" *> return Ast.NopF
 
 letExpr :: Parser Ast.Expr
-letExpr = spanned $ Ast.LetF <$> (reserved "let" *> identifier) <*> (reservedOp "=" *> expression)
+letExpr = spanned $ Ast.LetF <$> (reserved "let" *> pat) <*> (reservedOp "=" *> expression)
 
 assignExpr :: Parser Ast.Expr
 assignExpr = spanned $ Ast.AssignF <$> identifier <*> (reservedOp "=" *> expression)
@@ -173,6 +173,14 @@ letConstExpr = spanned $ Ast.LetConstF <$> (reserved "let" *> reserved "const" *
 
 returnExpr :: Parser Ast.Expr
 returnExpr = spanned $ Ast.RetF <$> (reserved "ret" *> expression)
+
+-- Parse a pattern.
+pat :: Parser Ast.Pat
+pat =  (Ast.VarPat <$> identifier)
+   <|> (Ast.TuplePat <$> tuplePat)
+   <?> "pattern"
+   where
+     tuplePat = braces $ sepEndBy pat comma
 
 unaryOp op f = do
   start <- getPosition
@@ -217,6 +225,7 @@ term =  try nestedCalls
     <|> try nestedAnn
     <|> try nestedProj
     <|> termFirst
+    <?> "term"
 
 -- my-func[x, y][1, 2][a, b, c]
 nestedCalls :: Parser Ast.Expr
@@ -266,6 +275,7 @@ semiEndedTerm =  intrinsicExpr
              <|> literalExpr
              <|> try assignExpr
              <|> varExpr
+             <?> "term that ends with `;`"
 
 endEndedTerm =  blockExpr
             <|> ifExpr
@@ -273,6 +283,7 @@ endEndedTerm =  blockExpr
             <|> loopExpr
             <|> defExpr
             <|> modExpr
+            <?> "term that ends with `end`"
 
 endEndedExpr = endEndedTerm
 
@@ -303,6 +314,7 @@ literal =  (Ast.Int <$> integer)
        <|> (Ast.Bool <$> boolean)
        <|> (Ast.Text <$> stringLiteral)
        <|> (Ast.Tuple <$> tuple)
+       <?> "literal"
  where
   boolean =  (reserved "true" >> return True)
          <|> (reserved "false" >> return False)
@@ -318,6 +330,7 @@ seqTerminatedBy end
   <|> try (Ast.Semi <$> terminatedExpr <*> seqTerminatedBy end)
   <|> (Ast.Result <$> (expression <* lookAhead end))
   <|> (lookAhead end *> return Ast.Empty)
+  <?> "sequence of expressions"
 
 blockExpr :: Parser Ast.Expr
 blockExpr = spanned do

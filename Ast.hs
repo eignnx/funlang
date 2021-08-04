@@ -11,6 +11,7 @@ module Ast
   , itemName
   , isModLevelItem
   , modLevelItemTy
+  , Pat(..)
   , Seq(..)
   , BinOp(..)
   , ArithOp(..)
@@ -47,7 +48,7 @@ data ExprF r
   | BlockF (Seq r)
   | CallF r [r]
   | IntrinsicF Parsec.SourcePos String [r]
-  | LetF String r
+  | LetF Pat r
   | AssignF String r
   | LetConstF String r
   | RetF r
@@ -91,6 +92,16 @@ modLevelItemTy = \case
             pairs = zip (map getItemName items) (map modLevelItemTy items)
 
   LetConstF _ (exprF :<: ty) :<: _ -> ty -- Just return the type of `e` in `static x = e`.
+
+-- Represents a pattern.
+data Pat
+  = VarPat String
+  | TuplePat [Pat]
+
+instance Show Pat where
+  show = \case
+    VarPat x -> x
+    TuplePat ps -> "{" ++ intercalate ", " (map show ps) ++ "}"
 
 data BinOp
   = ArithOp ArithOp
@@ -216,9 +227,9 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
     OtherOp Concat -> show x +++ "++" +++ show y
   show (BlockF Empty) = "do end"
   show (BlockF seq) = "do" ++ indent (show seq) ++ "\nend"
-  show (CallF f args) = show f ++ show args
+  show (CallF f args) = show f ++ "[" ++ intercalate ", " (map show args) ++ "]"
   show (IntrinsicF pos name args) = "intr." ++ name ++ show args
-  show (LetF name e) = "let" +++ name +++ "=" +++ show e
+  show (LetF pat e) = "let" +++ show pat +++ "=" +++ show e
   show (AssignF name e) = name +++ "=" +++ show e
   show (LetConstF name e) = "let const" +++ name +++ "=" +++ show e
   show (RetF e) = "ret" +++ show e

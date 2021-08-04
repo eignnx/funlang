@@ -16,12 +16,13 @@ module Ty
   )
 where
 
-import           Utils     ( (+++), code, codeIdent, indent )
+import           Utils     ( (+++), code, codeIdent )
 import qualified Data.Map  as M
 import           Data.List ( intercalate )
 
 data Ty
-  = ValTy String [Ty]
+  = TyVar String
+  | ValTy String [Ty]
   | FnTy [Ty] Ty
   | ModTy (M.Map String Ty) -- The type of a module
   deriving Eq

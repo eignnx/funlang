@@ -116,6 +116,29 @@ class CheckType a where
   infer :: a -> TyChecker (Res (Checked a))
   check :: a -> Ty -> TyChecker (Res (Checked a))
 
+instance CheckType Ast.Pat where
+  type Checked Ast.Pat = Ast.Pat
+
+  infer = undefined
+
+  check (Ast.VarPat name) ty = do
+    define name ty
+    return $ Ok $ Ast.VarPat name
+
+  check pat@(Ast.TuplePat ps) (TupleTy ts)
+    | length ps == length ts = do
+      let pairs = zip ps ts
+      psRes <- sequenceA <$> mapM (uncurry check) pairs
+      case psRes of
+        Ok ps'  -> return $ Ok $ Ast.TuplePat ps'
+        Err err -> return $ Err err
+    | otherwise = return $ Err $ RootCause msg
+      where msg = "The pattern" +++ code pat +++ "can't be bound to a tuple that has" +++ show (length ts) +++ "elements"
+    
+  check pat@(Ast.TuplePat ps) nonTupleTy =
+    return $ Err $ RootCause msg
+      where msg = "The tuple pattern" +++ code pat +++ "can't be bound to something of type" ++ code nonTupleTy
+
 instance CheckType (Ast.Seq Ast.Expr) where
 
   type Checked (Ast.Seq Ast.Expr) = (Ast.Seq Ast.TypedExpr, Ty)
@@ -291,15 +314,18 @@ instance CheckType Ast.Expr where
           where msg = "The arguments doesn't match for intrinsic" +++ codeIdent name
       Err err -> return $ Err err
 
-  infer (Ast.LetF name expr :@: loc) = do
+  infer (Ast.LetF pat expr :@: loc) = do
     exprRes <- infer expr
     case exprRes of
       Ok expr'@(_ :<: exprTy) -> do
-        define name exprTy
-        let letExpr = Ast.LetF name expr'
-        return $ Ok (letExpr :<: (exprTy -&&> VoidTy))
+        patRes <- check pat exprTy
+        case patRes of
+          Ok _ -> do
+            let letExpr = Ast.LetF pat expr'
+            return $ Ok (letExpr :<: (exprTy -&&> VoidTy))
+          Err err -> return $ Err err
       err -> return $ err `addError` msg
-        where msg = "The declaration of" +++ codeIdent name +++ "doesn't type check"
+        where msg = "The declaration of" +++ code pat +++ "doesn't type check"
 
   infer (Ast.AssignF name expr :@: loc) = do
     varRes <- varLookup name
@@ -491,16 +517,19 @@ instance CheckType Ast.Expr where
 --   --        err -> err `addError` ("The variable `" ++ var ++ "` is declared as a `" ++ show varTy ++ "`, but is bound to `" ++ show binding ++ "`. This is a problem")
 --   --   -- check ctx (App (FnExpr var body) binding) ty
 
-  check (Ast.LetF name expr :@: loc) ty =
+  check (Ast.LetF pat expr :@: loc) ty =
     if ty <: VoidTy then do
       res <- infer expr
       case res of
         Ok expr'@(_ :<: exprTy) -> do
-          define name exprTy
-          let letExpr = Ast.LetF name expr'
-          return $ Ok (letExpr :<: (exprTy -&&> VoidTy))
+          patRes <- check pat exprTy
+          case patRes of
+            Ok _ -> do
+              let letExpr = Ast.LetF pat expr'
+              return $ Ok (letExpr :<: (exprTy -&&> VoidTy))
+            Err err -> return $ Err err
         err -> return $ err `addError` msg
-          where msg = "The declaration of" +++ codeIdent name +++ "needs a type annotation"
+          where msg = "The declaration of" +++ code pat +++ "needs a type annotation"
     else
       return $ Err $ RootCause ("A let declaration has type" +++ code VoidTy)
 

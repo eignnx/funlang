@@ -102,6 +102,24 @@ instance Compile (Ast.Seq Ast.TypedExpr) where
                       else [Hir.Pop]
       return $ expr' ++ maybePop ++ seq'
 
+instance Compile Ast.Pat where
+
+  compile = \case
+
+    Ast.VarPat name ->
+      return [Hir.Store name]
+
+    Ast.TuplePat ps -> do
+      -- For every sub-pattern (except the last one), we'll need a copy of the TOS.
+      let dups = replicate (length ps - 1) Hir.Dup
+
+      -- Before the i-th sub-pattern, add `MemReadDirect i`.
+      ps' <- forM (zip ps [0..]) $ \(pat, idx) -> do
+        pat' <- compile pat
+        return $ Hir.MemReadDirect idx : pat'
+
+      return $ dups ++ concat ps'
+
 instance Compile Ast.TypedExpr where
 
   compile (Ast.BlockF seq :<: ty) = compile seq
@@ -178,11 +196,12 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.AnnF expr _ :<: ty)   = compile expr
 
-  compile (Ast.LetF name expr@(_ :<: exprTy) :<: _)
+  compile (Ast.LetF pat expr@(_ :<: exprTy) :<: _)
     | exprTy <: Ty.VoidTy = compile expr -- Still gotta run it cause it might have side-effects.
     | otherwise = do
       expr' <- compile expr
-      return $ expr' ++ [Hir.Store name]
+      pat' <- compile pat
+      return $ expr' ++ pat'
 
   compile (Ast.AssignF var expr@(_ :<: exprTy) :<: ty) = do
     expr' <- compile expr
