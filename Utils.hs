@@ -39,7 +39,7 @@ data Span = Span String (Int, Int) (Int, Int)
   deriving Eq
 
 instance Show Span where
-  show (Span file start end) = show file +++ "from" +++ pair start +++ "to" +++ pair end
+  show (Span file start end) = file +++ "from" +++ pair start +++ "to" +++ pair end
     where pair (a, b) = show a ++ ":" ++ show b
 
 mkSpan :: SourcePos -> SourcePos -> Span
