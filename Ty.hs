@@ -21,8 +21,8 @@ import qualified Data.Map  as M
 import           Data.List ( intercalate )
 
 data Ty
-  = TyVar String
-  | ValTy String [Ty]
+  = ValTy String [Ty]
+  | VrntTy (M.Map String Ty)
   | FnTy [Ty] Ty
   | ModTy (M.Map String Ty) -- The type of a module
   deriving Eq
