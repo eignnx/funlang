@@ -5,7 +5,6 @@ module Main where
 
 import qualified Ast
 import qualified Parser
-import           Parser         ( parseFile )
 import qualified Hir
 import qualified TyCheck
 import qualified TypedAstToHir
@@ -66,15 +65,15 @@ getOpts = do
 main :: IO ()
 main = do
   opts <- getOpts
-  ast  <- parseFile (filename opts)
+  ast  <- parseFile opts
   tast <- astToTypedAst opts ast
   hir  <- tastToHir opts tast
   lir  <- hirToLir opts hir
   execVmProgram opts lir
 
-parseSrc :: Opts -> String -> IO Ast.Expr
-parseSrc opts src = do
-  ast <- Parser.parseSrc (filename opts) src
+parseFile :: Opts -> IO Ast.Expr
+parseFile opts = do
+  ast <- Parser.parseFile $ filename opts
   when (traceCompilation opts) $ do
     putStrLn "\n===AST==="
     printAst ast
