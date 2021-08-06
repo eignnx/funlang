@@ -36,8 +36,7 @@ instance Show Ty where
 (<:) :: Ty -> Ty -> Bool
 NeverTy <: t2 = True
 t1 <: t2 | t1 == t2 = True
-ValTy n1 x1 <: ValTy n2 x2 = n1 == n2 && all (uncurry (<:)) (zip x1 x2)
-FnTy x1 y1 <: FnTy x2 y2 = all (uncurry (<:)) (zip x1 x2) && y1 <: y2
+FnTy x1 y1 <: FnTy x2 y2 = all (uncurry (flip (<:))) (zip x1 x2) && y1 <: y2
 ModTy m1 <: ModTy m2 = m2 `M.isSubmapOf` m1
 _ <: _ = False
 
