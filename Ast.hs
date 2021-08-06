@@ -11,6 +11,7 @@ module Ast
   , itemName
   , isModLevelItem
   , modLevelItemTy
+  , TyCmpntDef(..)
   , Pat(..)
   , Seq(..)
   , BinOp(..)
@@ -29,11 +30,12 @@ where
 
 import qualified Ty
 import           Cata                              ( At(..), RecTyped(..), Unwrap(..), cata )
-import           Utils                             ( (+++), code, indent )
+import           Utils                             ( (+++), code, indent, commaSep, braces )
 
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
 import           Data.List                         ( intercalate, isSuffixOf )
 import qualified Data.Map                          as M
+import qualified Data.Maybe
 
 -- This type used to be called `Expr` (see [this commit](1)), but was rewritten
 -- to use an F-Algebra (I think that's right?), and backwards-compatible
@@ -59,23 +61,26 @@ data ExprF r
   | AnnF r Ty.Ty
   | DefF String [(String, Ty.Ty)] (Maybe Ty.Ty) r
   | ModF String [r]
+  | TyDefF String [TyCmpntDef]
   deriving Functor
 
 type Expr = At ExprF
 
 itemName :: ExprF r -> Maybe String
 itemName = \case
-  DefF name _ _ _ -> Just name
-  ModF name _     -> Just name
-  LetConstF name _  -> Just name
+  DefF name _ _ _  -> Just name
+  ModF name _      -> Just name
+  LetConstF name _ -> Just name
+  TyDefF name _   -> Just name
   _               -> Nothing
 
 isModLevelItem :: ExprF r -> Bool
 isModLevelItem = \case
-  DefF _ _ _ _ -> True
-  ModF _ _     -> True
-  LetConstF _ _  -> True
-  _            -> False
+  DefF {}       -> True
+  ModF _ _      -> True
+  LetConstF _ _ -> True
+  TyDefF _ _   -> True
+  _             -> False
 
 modLevelItemTy :: TypedExpr -> Ty.Ty
 modLevelItemTy = \case
@@ -86,12 +91,23 @@ modLevelItemTy = \case
   DefF _ params (Just retTy) _ :<: _ ->
     Ty.FnTy (map snd params) retTy
 
-  ModF _ items :<: _ ->
-    (Ty.ModTy $ M.fromList $ pairs)
-      where getItemName (item :<: _) = maybe (error "") id $ itemName item
-            pairs = zip (map getItemName items) (map modLevelItemTy items)
+  ModF _ items :<: _ -> Ty.ModTy $ M.fromList pairs
+    where getItemName (item :<: _) = Data.Maybe.fromMaybe (error "") $ itemName item
+          pairs = zip (map getItemName items) (map modLevelItemTy items)
 
-  LetConstF _ (exprF :<: ty) :<: _ -> ty -- Just return the type of `e` in `static x = e`.
+  -- Just return the type of `e` in `static x = e`.
+  LetConstF _ (exprF :<: ty) :<: _ -> ty
+
+  TyDefF name _ :<: _ -> Ty.ValTy name []
+
+data TyCmpntDef
+  = VrntDef String [Ty.Ty]
+  | SubTyDef String
+
+instance Show TyCmpntDef where
+  show = \case
+    VrntDef name tys -> name +++ commaSep (map show tys)
+    SubTyDef name -> name
 
 -- Represents a pattern.
 data Pat
@@ -138,6 +154,7 @@ data Lit e
   | Text String
   | Unit
   | Tuple [e]
+  | Vrnt String [e]
   deriving (Show, Functor)
 
 data UnaryOp
@@ -212,10 +229,12 @@ showParams params = intercalate ", " $ map pairFmt params
 
 instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) where
   show (VarF name) = name
-  show (LiteralF (Int x)) = show x
-  show (LiteralF (Bool x)) = if x then "true" else "false"
-  show (LiteralF (Text x)) = show x
-  show (LiteralF (Tuple xs)) = "{" ++ intercalate ", " (map show xs) ++ "}"
+  show (LiteralF lit) = case lit of
+    Int x -> show x
+    Bool x -> if x then "true" else "false"
+    Text x -> show x
+    Tuple xs -> "{" ++ commaSep (map show xs) ++ "}"
+    Vrnt name args -> braces (name +++ commaSep (map show args))
   show (UnaryF Not x) = "not " ++ show x
   show (UnaryF Neg x) = "-(" ++ show x ++ ")"
   show (UnaryF (TupleProj idx) x) = show x ++ "." ++ show idx
@@ -242,13 +261,15 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (WhileF cond body) = "while" +++ show cond +++ show body
   show (LoopF body) = "loop" +++ show body
   show NopF = "nop"
-  show (AnnF e t) = show e ++ ":" +++ show t
+  show (AnnF e t) = show e +++ "is" +++ show t
   show (DefF name paramsAndTys (Just retTy) body) =
     "def" +++ name ++ "[" ++ showParams paramsAndTys ++ "] ->" +++ show retTy +++ show body
   show (DefF name paramsAndTys Nothing body) =
     "def" +++ name ++ "[" ++ showParams paramsAndTys ++ "] =" +++ indent (show body)
   show (ModF name items) =
     "mod" +++ name ++ indent (intercalate "\n\n" (map show items)) ++ "\nend"
+  show (TyDefF name ctorDefs) =
+    "type" +++ name ++ indent (intercalate "\n" (map (("|"+++) . show) ctorDefs)) ++ "\nend"
 
 instance Show TypedExpr where
   show (e :<: t) = "(" ++ show e +++ ":" +++ show t ++ ")"

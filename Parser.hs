@@ -31,6 +31,7 @@ languageDef = emptyDef
   , Token.identStart      = letter
   , Token.identLetter     = alphaNum <|> oneOf "_"
   , Token.reservedNames   = [ "mod"
+                            , "type"
                             , "def"
                             , "let"
                             , "const"
@@ -65,6 +66,7 @@ languageDef = emptyDef
                             -- , "!="
                             , "++"
                             , "->"
+                            , "|"
                             ]
   }
 
@@ -108,14 +110,32 @@ modExpr = spanned do
   reserved "end"
   return $ Ast.ModF name items
 
+tyDefExpr :: Parser Ast.Expr
+tyDefExpr = spanned do
+  reserved "type"
+  name <- identifier
+  ctorDefs <- many $ reservedOp "|" *> tyCmpntDef
+  reserved "end"
+  return $ Ast.TyDefF name ctorDefs
+
+tyCmpntDef :: Parser Ast.TyCmpntDef
+tyCmpntDef = vrntDef <|> subTyDef
+  where
+    vrntDef = do
+      colon
+      name <- identifier
+      components <- sepEndBy ty comma
+      return $ Ast.VrntDef (':' : name) components
+    subTyDef = Ast.SubTyDef <$> identifier
+
 -- ```
--- def my-fn[arg1, arg2, ...] do
+-- def my_fn[arg1, arg2, ...] do
 --   ...stmts...
 -- end
 -- ```
 -- OR
 -- ```
--- def my-fn[arg1, arg2, ...] = ...expr...
+-- def my_fn[arg1, arg2, ...] = ...expr...
 -- ```
 defExpr :: Parser Ast.Expr
 defExpr = spanned do
@@ -228,7 +248,7 @@ term =  try nestedCalls
     <|> termFirst
     <?> "term"
 
--- my-func[x, y][1, 2][a, b, c]
+-- my_func[x, y][1, 2][a, b, c]
 nestedCalls :: Parser Ast.Expr
 nestedCalls = do
   start <- getPosition
@@ -284,6 +304,7 @@ endEndedTerm =  blockExpr
             <|> loopExpr
             <|> defExpr
             <|> modExpr
+            <|> tyDefExpr
             <?> "term that ends with `end`"
 
 endEndedExpr = endEndedTerm
@@ -314,12 +335,19 @@ literal :: Parser (Ast.Lit Ast.Expr)
 literal =  (Ast.Int <$> integer)
        <|> (Ast.Bool <$> boolean)
        <|> (Ast.Text <$> stringLiteral)
-       <|> (Ast.Tuple <$> tuple)
+       <|> try (Ast.Tuple <$> tuple)
+       <|> vrnt
        <?> "literal"
  where
   boolean =  (reserved "true" >> return True)
          <|> (reserved "false" >> return False)
   tuple = braces $ sepEndBy expression comma
+  vrnt = braces do
+    colon
+    name <- identifier
+    args <- sepEndBy expression comma
+    return $ Ast.Vrnt (':' : name) args
+
 
 seqTerminatedBy :: Parser a -> Parser (Ast.Seq Ast.Expr)
 seqTerminatedBy end

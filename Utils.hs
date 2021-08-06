@@ -3,12 +3,17 @@ module Utils
   , code
   , codeIdent
   , indent
+  , brackets
+  , braces
+  , commaSep
+  , list
+  , optList
   , Span(..)
   , mkSpan
   )
 where
 
-import Data.List ( isPrefixOf, isSuffixOf )
+import Data.List ( isPrefixOf, isSuffixOf, intercalate )
 import Text.Parsec.Pos ( SourcePos, sourceName, sourceLine, sourceColumn )
 
 (+++) :: String -> String -> String
@@ -34,6 +39,23 @@ indent txt = replace "\n" "\n  " ("\n" ++ txt)
     replace from to input = if from `isPrefixOf` input
       then to ++ replace from to (drop (length from) input)
       else head input : replace from to (tail input)
+
+brackets :: String -> String
+brackets a = "[" ++ a ++ "]"
+
+braces :: String -> String
+braces a = "{" +++ a +++ "}"
+
+commaSep :: [String] -> String
+commaSep = intercalate ", "
+
+list :: Show a => [a] -> String
+list as = brackets $ commaSep $ map show as
+
+optList :: Show a => [a] -> String
+optList as
+  | null as = ""
+  | otherwise = list as
 
 data Span = Span String (Int, Int) (Int, Int)
   deriving Eq
