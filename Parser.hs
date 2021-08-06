@@ -152,8 +152,8 @@ defExpr = spanned do
   exprTail <|> blockTail
 
 ty :: Parser Ty.Ty
-ty =  try (Ty.ValTy <$> identifier <*> brackets (sepEndBy ty comma))
-  <|> (Ty.ValTy <$> identifier <*> pure [])
+ty =  try (Ty.TupleTy <$> (symbol "Tuple" *> brackets (sepEndBy ty comma)))
+  <|> (Ty.ValTy <$> identifier)
   <?> "type"
 
 ifExpr :: Parser Ast.Expr

@@ -8,7 +8,6 @@ module Ty
       , BoolTy
       , IntTy
       , TextTy
-      , TupleTy
       )
   , (<:)
   , (-&&>)
@@ -21,31 +20,32 @@ import qualified Data.Map  as M
 import           Data.List ( intercalate )
 
 data Ty
-  = ValTy String [Ty]
+  = ValTy String
   | VrntTy (M.Map String Ty)
+  | TupleTy [Ty]
   | FnTy [Ty] Ty
   | ModTy (M.Map String Ty) -- The type of a module
   deriving Eq
 
 instance Show Ty where
-  show (ValTy name []) = name
-  show (ValTy name args) = name ++ "[" ++ intercalate ", " (map show args) ++ "]"
+  show (ValTy name) = name
   show (FnTy params ret) = show params +++ "->" +++ show ret
   show (ModTy m) = "{" +++ intercalate ", " ((\(name, ty) -> name ++ ":" +++ show ty) <$> M.toList m) +++ "}"
 
 (<:) :: Ty -> Ty -> Bool
 NeverTy <: t2 = True
 t1 <: t2 | t1 == t2 = True
+ValTy n1 <: ValTy n2 = n1 == n2
+TupleTy ts1 <: TupleTy ts2 = all (uncurry (<:)) (zip ts1 ts2)
 FnTy x1 y1 <: FnTy x2 y2 = all (uncurry (flip (<:))) (zip x1 x2) && y1 <: y2
 ModTy m1 <: ModTy m2 = m2 `M.isSubmapOf` m1
 _ <: _ = False
 
-pattern NeverTy     = ValTy "Never" []
-pattern VoidTy      = ValTy "Void" []
-pattern BoolTy      = ValTy "Bool" []
-pattern IntTy       = ValTy "Int" []
-pattern TextTy      = ValTy "Text" []
-pattern TupleTy ts  = ValTy "Tuple" ts
+pattern NeverTy = ValTy "Never"
+pattern VoidTy  = ValTy "Void"
+pattern BoolTy  = ValTy "Bool"
+pattern IntTy   = ValTy "Int"
+pattern TextTy  = ValTy "Text"
 
 -- | Short-circuits a type if the first type is `Never`.
 --   For instance, in the block expression `do intr.exit[]; 1 end`, the entire

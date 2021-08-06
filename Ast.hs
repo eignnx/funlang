@@ -98,7 +98,7 @@ modLevelItemTy = \case
   -- Just return the type of `e` in `static x = e`.
   LetConstF _ (exprF :<: ty) :<: _ -> ty
 
-  TyDefF name _ :<: _ -> Ty.ValTy name []
+  TyDefF name _ :<: _ -> Ty.ValTy name
 
 data TyCmpntDef
   = VrntDef String [Ty.Ty]
