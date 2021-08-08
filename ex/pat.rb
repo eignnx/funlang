@@ -10,7 +10,7 @@ def main[] do
 end
 
 def assert_eq[expected: Int, actual: Int, msg: Text] do
-  if not intr.eq-int[expected, actual] then
+  if not intr.eq_int[expected, actual] then
     intr.puts[msg];
     intr.exit[];
   else
