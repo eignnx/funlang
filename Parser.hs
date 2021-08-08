@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Parser
   ( parseString
@@ -7,8 +8,8 @@ module Parser
   )
 where
 
-import qualified Ast                  as Ast
-import qualified Ty                   as Ty
+import qualified Ast
+import qualified Ty
 import           Utils                ( Span(..), mkSpan )
 import           Cata                 ( At(..) )
 import           Control.Monad
@@ -386,7 +387,18 @@ parseFile fileName = do
   parseSrc fileName src
 
 modNameFromFileName :: String -> String
-modNameFromFileName fileName = capitalize $ takeBaseName fileName
+modNameFromFileName fileName = camelCase $ splitName $ takeBaseName fileName
+
+splitName :: String -> [String]
+splitName = go ""
+  where go acc = \case
+            "" -> [acc]
+            c : cs
+              | c `elem` ['-', '_'] -> acc : go "" cs
+              | otherwise -> go (acc ++ [c]) cs
+
+camelCase :: [String] -> String
+camelCase = concatMap capitalize
   where capitalize (c:cs) = Char.toUpper c : cs
 
 spanned :: Parser (Ast.ExprF (At Ast.ExprF)) -> Parser (At Ast.ExprF)
