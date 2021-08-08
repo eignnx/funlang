@@ -1,9 +1,3 @@
-type Color
-  | :Rgb Int, Int, Int
-  | :Hsb Int, Int, Int
-  | NamedColor
-end
-
 type NamedColor
   | :Red
   | :Green
@@ -13,6 +7,12 @@ type NamedColor
   | :Yellow
   | :Black
   | :White
+end
+
+type Color
+  | :Rgb Int, Int, Int
+  | :Hsb Int, Int, Int
+  | NamedColor
 end
 
 def main[] do
