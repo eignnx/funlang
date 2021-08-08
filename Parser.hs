@@ -52,7 +52,7 @@ languageDef = emptyDef
                             , "and"
                             , "or"
                             , "xor"
-                            , "is"
+                            , "as"
                             ]
   , Token.opStart         = oneOf "+-*/=<>!^?&|"
   , Token.opLetter        = oneOf "+-*/=<>!$@%^?&|"
@@ -264,7 +264,7 @@ nestedAnn :: Parser Ast.Expr
 nestedAnn = do
   start <- getPosition
   head <- termFirst
-  allTys <- many1 ((,) <$> (reserved "is" *> ty) <*> getPosition)
+  allTys <- many1 ((,) <$> (reserved "as" *> ty) <*> getPosition)
   return $ foldl (reducer start) head allTys -- Build up all the annotations
   where
     reducer start expr (ty, end) = Ast.AnnF expr ty :@: mkSpan start end
