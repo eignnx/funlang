@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 
-module TypedAstToHir
+module TastToHir
     ( initialCState
     , astToHir
     , runCompilation

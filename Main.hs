@@ -8,7 +8,7 @@ import qualified Parser
 import qualified Hir
 import qualified TyCheck
 import qualified Res
-import qualified TypedAstToHir
+import qualified TastToHir
 import qualified Lir
 import qualified ToLir
 import qualified Vm
@@ -94,8 +94,8 @@ astToTypedAst opts ast = do
 
 
 tastToHir :: Opts -> Ast.TypedExpr -> IO [Hir.Instr]
-tastToHir opts ast = do
-  let hir = TypedAstToHir.astToHir ast
+tastToHir opts tast = do
+  let hir = TastToHir.astToHir tast
   when (traceCompilation opts) $ do
     putStrLn "\n===HIR==="
     printHir hir
@@ -151,7 +151,7 @@ compileAndRun ast = do
   let tast      = case TyCheck.astToTypedAst ast of
                        Res.Ok tast -> tast
                        Res.Err err -> error $ show err
-  let hirInstrs = TypedAstToHir.astToHir tast
+  let hirInstrs = TastToHir.astToHir tast
   let lirInstrs = ToLir.hirToLir hirInstrs
   Vm.execVmProgram lirInstrs
   return ()
