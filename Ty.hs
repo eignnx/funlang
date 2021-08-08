@@ -41,7 +41,7 @@ pattern TextTy  = ValTy "Text"
 
 tySize :: Ty -> Int
 tySize = \case
-  NeverTy -> undefined
+  NeverTy -> 0 -- Doesn't matter what size it is, it'll never get here.
   VoidTy  -> 0
   _       -> 1
 
