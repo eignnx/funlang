@@ -9,6 +9,8 @@ module Ty
       , IntTy
       , TextTy
       )
+    , tySize
+    , isZeroSized
   )
 where
 
@@ -36,3 +38,12 @@ pattern VoidTy  = ValTy "Void"
 pattern BoolTy  = ValTy "Bool"
 pattern IntTy   = ValTy "Int"
 pattern TextTy  = ValTy "Text"
+
+tySize :: Ty -> Int
+tySize = \case
+  NeverTy -> undefined
+  VoidTy  -> 0
+  _       -> 1
+
+isZeroSized :: Ty -> Bool
+isZeroSized = (==0) . tySize

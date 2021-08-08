@@ -9,7 +9,7 @@ module TypedAstToHir
 where
 
 import qualified Ty
-import           Ty                           ( (<:) )
+import           Ty                           ( isZeroSized )
 import qualified Ast
 import           Ast                          ( Typed(..) )
 import qualified Hir
@@ -90,16 +90,14 @@ instance Compile (Ast.Seq Ast.TypedExpr) where
   compile (Ast.Result expr) = compile expr
 
   compile (Ast.Semi expr@(exprF :<: ty) seq)
-    | ty <: Ty.VoidTy = do -- Already Void type, no need to Pop.
+    | isZeroSized ty = do -- Already Void type, no need to Pop.
       expr' <- compile expr
       seq' <- compile seq
       return $ expr' ++ seq'
     | otherwise = do -- This one needs to discard its non-Void result.
       expr' <- compile expr
       seq' <- compile seq
-      let maybePop = if ty <: Ty.VoidTy || Ast.isModLevelItem exprF
-                      then []
-                      else [Hir.Pop]
+      let maybePop = [Hir.Pop | not (isZeroSized ty || Ast.isModLevelItem exprF)]
       return $ expr' ++ maybePop ++ seq'
 
 instance Compile Ast.Pat where
@@ -132,7 +130,7 @@ instance Compile Ast.TypedExpr where
            ++ [Hir.CallDirect lbl argC]
 
   compile (Ast.VarF name :<: ty)
-    | ty <: Ty.VoidTy = return []
+    | isZeroSized ty = return []
     | otherwise = return [Hir.Load name]
 
   compile (Ast.LiteralF lit :<: ty) =
@@ -197,7 +195,7 @@ instance Compile Ast.TypedExpr where
   compile (Ast.AnnF expr _ :<: ty)   = compile expr
 
   compile (Ast.LetF pat expr@(_ :<: exprTy) :<: _)
-    | exprTy <: Ty.VoidTy = compile expr -- Still gotta run it cause it might have side-effects.
+    | isZeroSized exprTy = compile expr -- Still gotta run it cause it might have side-effects.
     | otherwise = do
       expr' <- compile expr
       pat' <- compile pat
@@ -205,7 +203,7 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.AssignF var expr@(_ :<: exprTy) :<: ty) = do
     expr' <- compile expr
-    let maybeStore = if exprTy <: Ty.VoidTy then [] else [Hir.Store var]
+    let maybeStore = [Hir.Store var | not (isZeroSized exprTy)]
     return $ expr' ++ maybeStore
 
   compile (Ast.IfF cond yes no :<: ty) = do
@@ -316,7 +314,7 @@ trampoline defs = entryPointJump ++ exit
       where
         mainLbl = case find (\(name, _, _) -> name == "main") defs of
                     Just (_, lbl, _) -> lbl
-                    Nothing -> error $ "Couldn't find `def main`!"
+                    Nothing -> error "Couldn't find `def main`!"
 
 
 joinDefs :: [(String, Hir.Lbl, [Hir.Instr])] -> [Hir.Instr]

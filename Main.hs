@@ -7,6 +7,7 @@ import qualified Ast
 import qualified Parser
 import qualified Hir
 import qualified TyCheck
+import qualified Res
 import qualified TypedAstToHir
 import qualified Lir
 import qualified ToLir
@@ -82,12 +83,12 @@ parseFile opts = do
 astToTypedAst :: Opts -> Ast.Expr -> IO Ast.TypedExpr
 astToTypedAst opts ast = do
   case TyCheck.astToTypedAst ast of
-    TyCheck.Ok tast -> do
+    Res.Ok tast -> do
       when (traceCompilation opts) $ do
         putStrLn "\n===TAST==="
         printTypedAst tast
       return tast
-    TyCheck.Err err -> do
+    Res.Err err -> do
       putStrLn $ "\n===COMPILATION ERROR===\n" ++ show err ++ "\n======================="
       exitWith (ExitFailure 1)
 
@@ -148,8 +149,8 @@ printLir lir = putStrLn $ unlines $ zipWith fmt [0..] lir
 compileAndRun :: Ast.Expr -> IO ()
 compileAndRun ast = do
   let tast      = case TyCheck.astToTypedAst ast of
-                       TyCheck.Ok tast -> tast
-                       TyCheck.Err err -> error $ show err
+                       Res.Ok tast -> tast
+                       Res.Err err -> error $ show err
   let hirInstrs = TypedAstToHir.astToHir tast
   let lirInstrs = ToLir.hirToLir hirInstrs
   Vm.execVmProgram lirInstrs
