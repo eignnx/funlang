@@ -10,6 +10,8 @@ module Tcx
   , setFnRetTy
   , varLookup
   , getFnRetTy
+  , defineTyAlias
+  , resolveAliasAsVrnts
   )
 where
 
@@ -17,14 +19,15 @@ import Ty (Ty(..))
 import qualified Data.Map as M
 import Control.Monad.State (State, MonadState(get, put), gets)
 import Control.Monad (foldM)
-import Res (Res, Error (RootCause), toRes)
-import Utils (code, (+++))
+import Res (Res (Ok, Err), Error (RootCause), toRes)
+import Utils (code, (+++), codeIdent)
+import Data.List (find)
 
 type Tcx = [TcxElem]
 
 data TcxElem
   = VarBind String Ty
-  -- | AliasBind String Ty
+  | AliasBind String Ty
   deriving (Show, Eq)
 
 tcxLookupVar :: String -> Tcx -> Maybe Ty
@@ -105,3 +108,29 @@ getFnRetTy = do
   case tcxLookupVar "#ret" ctx of
     Just ty -> return ty
     Nothing -> error "Internal Compiler Error: couldn't find `#ret` in `ctx`!"
+
+defineTyAlias :: String -> Ty -> TyChecker ()
+defineTyAlias name ty = do
+  ctx <- get
+  put $ AliasBind name ty : ctx
+
+resolveAlias :: String -> TyChecker (Res Ty)
+resolveAlias name = do
+  ctx <- get
+  case find (searcher name) ctx of
+    Just (AliasBind _ ty) -> return $ Ok ty
+    _ -> return $ Err $ RootCause msg
+      where msg = "I'm not aware of a type called" +++ codeIdent name
+  where
+    searcher n1 = \case
+      AliasBind n2 ty -> n1 == n2
+      _ -> False
+
+resolveAliasAsVrnts :: String -> TyChecker (Res (M.Map String [Ty]))
+resolveAliasAsVrnts name = do
+  res <- resolveAlias name
+  case res of
+    Ok (VrntTy vrnts) -> return $ Ok vrnts
+    Ok other -> return $ Err $ RootCause msg
+      where msg = "The type" +++ codeIdent name +++ "refers to a" +++ code other +++ "not a variant type"
+    Err err -> return $ Err err

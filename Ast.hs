@@ -272,7 +272,7 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
     "type" +++ name ++ indent (intercalate "\n" (map (("|"+++) . show) ctorDefs)) ++ "\nend"
 
 instance Show TypedExpr where
-  show (e :<: t) = "(" ++ show e +++ ":" +++ show t ++ ")"
+  show (e :<: t) = "(" ++ show e +++ ":<:" +++ show t ++ ")"
 
 instance Show Expr where
   show (e :@: _) = show e

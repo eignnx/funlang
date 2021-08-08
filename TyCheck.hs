@@ -14,7 +14,7 @@ where
 import qualified Ast
 import           Ast           ( Typed(HasTy) )
 import           Ty            ( Ty(..) )
-import           Tcx           ( TyChecker(..), (<:), (-&&>), (>||<), varLookup, define, setFnRetTy, getFnRetTy )
+import           Tcx           ( TyChecker(..), (<:), (-&&>), (>||<), varLookup, define, setFnRetTy, getFnRetTy, resolveAliasAsVrnts, defineTyAlias )
 import           Utils         ( (+++), code, codeIdent, indent )
 import           Cata          ( RecTyped(..), At(..) )
 import           Res           ( Res(..), Error (RootCause), addError, toRes, ensureM )
@@ -134,7 +134,7 @@ inferBinOp op argTy retTy e1 e2 = do
 
 itemName :: Show (Ast.ExprF r) => Ast.ExprF r -> Res String
 itemName expr = Ast.itemName expr `toRes` RootCause msg
-  where msg = "The expression" +++ code expr +++ "can't appear in the top level."
+  where msg = "The expression" +++ code expr +++ "can't appear in the top level"
 
 instance CheckType Ast.Expr where
 
@@ -152,11 +152,11 @@ instance CheckType Ast.Expr where
   infer (Ast.LiteralF x :@: loc) =
     case x of
 
-      Ast.Unit     -> return $ Ok $ Ast.LiteralF Ast.Unit :<: VoidTy
+      Ast.Unit   -> return $ Ok $ Ast.LiteralF Ast.Unit :<: VoidTy
 
-      Ast.Bool b   -> return $ Ok $ Ast.LiteralF (Ast.Bool b) :<: BoolTy
+      Ast.Bool b -> return $ Ok $ Ast.LiteralF (Ast.Bool b) :<: BoolTy
 
-      Ast.Int i    -> return $ Ok $ Ast.LiteralF (Ast.Int i) :<: IntTy
+      Ast.Int i  -> return $ Ok $ Ast.LiteralF (Ast.Int i) :<: IntTy
 
       Ast.Text t -> return $ Ok $ Ast.LiteralF (Ast.Text t) :<: TextTy
 
@@ -167,6 +167,17 @@ instance CheckType Ast.Expr where
             let exprTys = map (\(_ :<: ty) -> ty) exprs'
             return $ Ok $ Ast.LiteralF (Ast.Tuple exprs') :<: TupleTy exprTys
           Err err -> return $ Err err
+
+      -- To infer the type of a variant literal, just pacakge its name and the
+      -- types of its arguments inside `VrntTy`.
+      Ast.Vrnt name args -> do
+        argsRes <- sequenceA <$> mapM infer args
+        case argsRes of
+          Ok args' -> do
+            let argTys = map (\(_ :<: ty) -> ty) args'
+            let ty = VrntTy $ M.singleton name argTys
+            let lit = Ast.LiteralF (Ast.Vrnt name args')
+            return $ Ok $ lit :<: ty
 
   infer (Ast.UnaryF op@Ast.Not expr :@: loc) = inferUnaryOp op BoolTy BoolTy expr
   infer (Ast.UnaryF op@Ast.Neg expr :@: loc) = inferUnaryOp op IntTy IntTy expr
@@ -401,8 +412,22 @@ instance CheckType Ast.Expr where
           Ast.LetConstF name _ :@: loc -> do
             define name NeverTy
             return $ Ok ()
+          Ast.TyDefF tyName defs :@: loc -> do
+            let
+              f (Ast.VrntDef name tys) = return $ Ok $ M.singleton name tys
+              f (Ast.SubTyDef name) = resolveAliasAsVrnts name
+            cmpntsUnjoined <- sequenceA <$> mapM f defs
+            case mconcat <$> cmpntsUnjoined of
+              Ok cmpnts -> do
+                let vrntTy = VrntTy cmpnts
+                defineTyAlias tyName vrntTy
+                return $ Ok ()
+              Err err -> return $ Err err
           other -> return $ Err $ RootCause msg
             where msg = "I can't let you put the expression" +++ code other +++ "at the top-level of a module.")
+
+  infer (Ast.TyDefF name defs :@: loc) = do
+    return $ Ok $ Ast.TyDefF name defs :<: VoidTy
 
   -- -- Default case.
   -- infer expr = return $ Err $ RootCause $ msg

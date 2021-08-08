@@ -14,7 +14,7 @@ module Ty
   )
 where
 
-import           Utils     ( (+++), code, codeIdent )
+import           Utils     ( (+++), code, codeIdent, braces, commaSep, list, optList )
 import qualified Data.Map  as M
 import           Data.List ( intercalate )
 import Control.Monad (foldM)
@@ -22,7 +22,7 @@ import Control.Monad.State (StateT)
 
 data Ty
   = ValTy String
-  | VrntTy (M.Map String Ty)
+  | VrntTy (M.Map String [Ty])
   | TupleTy [Ty]
   | FnTy [Ty] Ty
   | ModTy (M.Map String Ty) -- The type of a module
@@ -30,8 +30,11 @@ data Ty
 
 instance Show Ty where
   show (ValTy name) = name
-  show (FnTy params ret) = show params +++ "->" +++ show ret
-  show (ModTy m) = "{" +++ intercalate ", " ((\(name, ty) -> name ++ ":" +++ show ty) <$> M.toList m) +++ "}"
+  show (VrntTy vrnts) = braces $ commaSep (uncurry f <$> M.toList vrnts)
+    where f ctorName ctorParams = ctorName ++ optList ctorParams
+  show (FnTy params ret) = list params +++ "->" +++ show ret
+  show (ModTy m) = braces $ commaSep (uncurry f <$> M.toList m)
+    where f name ty = name ++ ":" +++ show ty
 
 pattern NeverTy = ValTy "Never"
 pattern VoidTy  = ValTy "Void"
