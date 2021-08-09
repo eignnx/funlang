@@ -65,4 +65,4 @@ ensureM cond failureMsg program = do
   res <- program
   if bool
     then return res
-    else return $ res `addError` failureMsg
+    else return $ Err $ RootCause failureMsg
