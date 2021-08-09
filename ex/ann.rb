@@ -1,3 +1,3 @@
 def main[] do
-  let a = 1 as Text;
+  1 as Text; # Should fail!
 end
