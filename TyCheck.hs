@@ -14,7 +14,7 @@ where
 import qualified Ast
 import           Ast           ( Typed(HasTy) )
 import           Ty            ( Ty(..) )
-import           Tcx           ( TyChecker(..), (<:), (-&&>), (>||<), varLookup, define, setFnRetTy, getFnRetTy, resolveAliasAsVrnts, defineTyAlias )
+import           Tcx           ( TyChecker(..), (<:), (-&&>), (>||<), varLookup, define, setFnRetTy, getFnRetTy, resolveAliasAsVrnts, defineTyAlias, initTcx )
 import           Utils         ( (+++), code, codeIdent, indent )
 import           Cata          ( RecTyped(..), At(..) )
 import           Res           ( Res(..), Error (RootCause), addError, toRes, ensureM )
@@ -25,6 +25,7 @@ import           Data.Semigroup
 import           Control.Monad.State
 import           Control.Applicative
 import           Data.Maybe    ( isJust, fromMaybe )
+import Debug.Trace (trace)
 
 class CheckType a where
   type Checked a :: *
@@ -549,10 +550,11 @@ instance CheckType Ast.Expr where
   check expr ty = do
     -- Switch from checking to inferring.
     exprRes <- infer expr
+    st <- get
     case exprRes of
       Ok expr'@(_ :<: exprTy) -> ensureM (exprTy <: ty) notSubtypeMsg $ do
         return $ Ok expr'
-        where notSubtypeMsg = "The expression" +++ code expr +++ "has type" +++ code exprTy ++ ", not" +++ code ty
+        where notSubtypeMsg = "The expression" +++ code expr +++ "has type" +++ code exprTy ++ ", not" +++ code ty ++ ".\n----------\n" +++ code st
       err -> return $ err `addError` msg
         where msg = "The expression" +++ code expr +++ "doesn't typecheck"
 
@@ -572,4 +574,4 @@ checkSameType e1 e2 = do
 
 
 astToTypedAst :: CheckType a => a -> Res (Checked a)
-astToTypedAst ast = evalState (infer ast) []
+astToTypedAst ast = evalState (infer ast) initTcx

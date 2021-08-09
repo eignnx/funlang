@@ -154,7 +154,7 @@ defExpr = spanned do
 
 ty :: Parser Ty.Ty
 ty =  try (Ty.TupleTy <$> (symbol "Tuple" *> brackets (sepEndBy ty comma)))
-  <|> (Ty.ValTy <$> identifier)
+  <|> (Ty.AliasTy <$> identifier)
   <?> "type"
 
 ifExpr :: Parser Ast.Expr

@@ -3,6 +3,7 @@
 module Tcx
   ( Tcx(..)
   , TyChecker(..)
+  , initTcx
   , (<:)
   , (-&&>)
   , (>||<)
@@ -18,10 +19,12 @@ where
 import Ty (Ty(..))
 import qualified Data.Map as M
 import Control.Monad.State (State, MonadState(get, put), gets)
-import Control.Monad (foldM)
 import Res (Res (Ok, Err), Error (RootCause), toRes)
 import Utils (code, (+++), codeIdent)
 import Data.List (find)
+import Control.Monad (forM)
+import Control.Monad (foldM)
+import Data.Monoid (All(All, getAll))
 
 type Tcx = [TcxElem]
 
@@ -36,6 +39,15 @@ tcxLookupVar needle = \case
   VarBind name ty : tcx
     | name == needle -> Just ty
     | otherwise -> tcxLookupVar needle tcx
+  _ : tcx -> tcxLookupVar needle tcx
+
+initTcx :: Tcx
+initTcx = [ AliasBind "Never" NeverTy
+          , AliasBind "Void" VoidTy
+          , AliasBind "Bool" BoolTy
+          , AliasBind "Int" IntTy
+          , AliasBind "Text" TextTy
+          ]
 
 type TyChecker = State Tcx
 
@@ -45,6 +57,22 @@ NeverTy <: t2 = return True
 t1 <: t2 | t1 == t2 = return True
 
 ValTy n1 <: ValTy n2 = return $ n1 == n2
+
+AliasTy name <: ty = do
+  tyRes <- resolveAlias name
+  case tyRes of
+    Ok resolved -> resolved <: ty
+    Err err -> return $ error $ show err
+
+ty <: AliasTy name = do
+  tyRes <- resolveAlias name
+  case tyRes of
+    Ok resolved -> ty <: resolved
+    Err err -> return $ error $ show err
+
+VrntTy vs1 <: VrntTy vs2 = do
+  isSubmapOfM ctorSubtype vs1 vs2
+  where ctorSubtype ts1 ts2 = TupleTy ts1 <: TupleTy ts2
 
 TupleTy ts1 <: TupleTy ts2 = do
   foldM allSubtypes True (zip ts1 ts2)
@@ -61,6 +89,18 @@ FnTy xs1 y1 <: FnTy xs2 y2 = do
 ModTy m1 <: ModTy m2 = return $ m2 `M.isSubmapOf` m1
 
 _ <: _ = return False
+
+isSubmapOfM :: (Ord k, Monad m)
+            => (v -> v -> m Bool)
+            -> M.Map k v
+            -> M.Map k v
+            -> m Bool
+isSubmapOfM predM m1 m2 = do
+  asdf <- forM (M.toList m1) $ \(k1, v1) ->
+    case M.lookup k1 m2 of
+      Just v2 -> predM v1 v2
+      Nothing -> return False
+  return $ and asdf
 
 -- | Short-circuits a type if the first type is `Never`.
 --   For instance, in the block expression `do intr.exit[]; 1 end`, the entire

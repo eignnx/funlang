@@ -16,7 +16,7 @@ type Color
 end
 
 def main[] do
-  let green = { :Green };
-  let color = { :Rbg 50, 100, 200 } is Color;
+  let green = { :Green } as NamedColor;
+  let color = { :Rgb 50, 100, 200 } as Color;
   color = green; # Note: Should be allowed because NamedColor <: Color.
 end
