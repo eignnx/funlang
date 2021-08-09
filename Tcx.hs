@@ -98,7 +98,7 @@ setFnRetTy = define "#ret"
 varLookup :: String -> TyChecker (Res Ty)
 varLookup name = do
   ctx <- get
-  let reason = RootCause ("The variable" +++ code name +++ "is not declared anywhere.")
+  let reason = RootCause ("The variable" +++ codeIdent name +++ "is not declared anywhere.")
   let res = toRes (tcxLookupVar name ctx) reason
   return res
 
