@@ -155,6 +155,18 @@ instance Compile Ast.TypedExpr where
           addWrite :: [Hir.Instr] -> Int -> [Hir.Instr]
           addWrite hir idx = hir ++ [Hir.MemWriteDirect idx]
 
+      Ast.Vrnt name args -> do
+        args' <- mapM compile args
+        return $ allocation : tag ++ writes args'
+        where
+          allocation = Hir.Alloc (length args + 1)
+          tag = [Hir.Const $ Hir.VInt h, Hir.MemWriteDirect 0]
+          h = 12345 -- TODO: actually impl tag
+          writes :: [[Hir.Instr]] -> [Hir.Instr]
+          writes es = concat $ zipWith addWrite es [1..]
+          addWrite :: [Hir.Instr] -> Int -> [Hir.Instr]
+          addWrite hir idx = hir ++ [Hir.MemWriteDirect idx]
+
   compile (Ast.UnaryF op expr :<: ty) = do
     expr' <- compile expr
     op'   <- compile op
@@ -266,6 +278,9 @@ instance Compile Ast.TypedExpr where
       return $ prologue -- First run the prologue.
             ++ body'    -- Then run the body of the function.
             ++ epilogue -- Finally, run the epilogue.
+    return []
+
+  compile (Ast.TyDefF name ctorDefs :<: ty) = do
     return []
 
 instance Compile Ast.UnaryOp where
