@@ -98,7 +98,7 @@ modLevelItemTy = \case
   -- Just return the type of `e` in `static x = e`.
   LetConstF _ (exprF :<: ty) :<: _ -> ty
 
-  TyDefF name _ :<: _ -> Ty.ValTy name
+  TyDefF name _ :<: _ -> Ty.AliasTy name
 
 data TyCmpntDef
   = VrntDef String [Ty.Ty]
@@ -261,7 +261,7 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (WhileF cond body) = "while" +++ show cond +++ show body
   show (LoopF body) = "loop" +++ show body
   show NopF = "nop"
-  show (AnnF e t) = show e +++ "is" +++ show t
+  show (AnnF e t) = show e +++ "as" +++ show t
   show (DefF name paramsAndTys (Just retTy) body) =
     "def" +++ name ++ "[" ++ showParams paramsAndTys ++ "] ->" +++ show retTy +++ show body
   show (DefF name paramsAndTys Nothing body) =

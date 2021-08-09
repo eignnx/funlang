@@ -22,6 +22,7 @@ import Control.Monad.State (StateT)
 
 data Ty
   = ValTy String
+  | AliasTy String
   | VrntTy (M.Map String [Ty])
   | TupleTy [Ty]
   | FnTy [Ty] Ty
@@ -29,7 +30,8 @@ data Ty
   deriving Eq
 
 instance Show Ty where
-  show (ValTy name) = name
+  show (ValTy name) = "$" ++ name
+  show (AliasTy name) = name
   show (VrntTy vrnts) = braces $ commaSep (uncurry f <$> M.toList vrnts)
     where f ctorName ctorParams = ctorName ++ optList ctorParams
   show (FnTy params ret) = list params +++ "->" +++ show ret
