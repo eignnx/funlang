@@ -13,6 +13,7 @@ module Ast
   , modLevelItemTy
   , TyCmpntDef(..)
   , Pat(..)
+  , RefutPat(..)
   , Seq(..)
   , BinOp(..)
   , ArithOp(..)
@@ -30,7 +31,7 @@ where
 
 import qualified Ty
 import           Cata                              ( At(..), RecTyped(..), Unwrap(..), cata )
-import           Utils                             ( (+++), code, indent, commaSep, braces )
+import           Utils                             ( (+++), code, indent, commaSep, braces, optList )
 
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
 import           Data.List                         ( intercalate, isSuffixOf )
@@ -56,6 +57,7 @@ data ExprF r
   | LetConstF String r
   | RetF r
   | IfF r (Seq r) (Seq r)
+  | MatchF r [(RefutPat, Seq r)]
   | WhileF r r
   | LoopF r
   | NopF
@@ -118,7 +120,16 @@ data Pat
 instance Show Pat where
   show = \case
     VarPat x -> x
-    TuplePat ps -> "{" ++ intercalate ", " (map show ps) ++ "}"
+    TuplePat ps -> braces $ commaSep (map show ps)
+
+data RefutPat
+  = VarRefutPat String
+  | VrntRefutPat String [RefutPat]
+
+instance Show RefutPat where
+  show = \case
+    VarRefutPat x -> x
+    VrntRefutPat name args -> braces $ name ++ optList args
 
 data BinOp
   = ArithOp ArithOp
@@ -259,6 +270,7 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (LetConstF name e) = "let const" +++ name +++ "=" +++ show e
   show (RetF e) = "ret" +++ show e
   show (IfF cond yes no) = "if" +++ show cond +++ "then" ++ indent (show yes) ++ "\nelse" ++ indent (show no) ++ "\nend"
+  show (MatchF scrut arms) = "match" +++ show scrut ++ indent (concatMap ((++"\n") . ("|"+++) . (\(pat, seq) -> show pat +++ "=>" +++ show seq)) arms) ++ "end"
   show (WhileF cond body) = "while" +++ show cond +++ show body
   show (LoopF body) = "loop" +++ show body
   show NopF = "nop"

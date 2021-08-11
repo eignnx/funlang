@@ -26,6 +26,7 @@ import           Control.Monad.State
 import           Control.Applicative
 import           Data.Maybe    ( isJust, fromMaybe )
 import Debug.Trace (trace)
+import GHCi.Message (Msg(Msg))
 
 class CheckType a where
   type Checked a :: *
@@ -54,6 +55,28 @@ instance CheckType Ast.Pat where
   check pat@(Ast.TuplePat ps) nonTupleTy =
     return $ Err $ RootCause msg
       where msg = "The tuple pattern" +++ code pat +++ "can't be bound to something of type" ++ code nonTupleTy
+
+instance CheckType Ast.RefutPat where
+  type Checked Ast.RefutPat = Ast.RefutPat
+
+  infer = undefined
+
+  check (Ast.VarRefutPat name) ty = do
+    define name ty
+    return $ Ok $ Ast.VarRefutPat name
+
+  check pat@(Ast.VrntRefutPat name params) (VrntTy vrnts) = do
+    case M.lookup name vrnts of
+      Just expectedParamTys -> do
+        paramsRes <- sequenceA <$> forM (zip params expectedParamTys) (\(param, expectedTy) -> do
+          check param expectedTy)
+        return $ Ast.VrntRefutPat name <$> paramsRes
+      Nothing -> return $ Err $ RootCause msg
+        where msg = "I don't know what" +++ codeIdent name +++ "refers to in the pattern" +++ code pat
+
+  check pat@(Ast.VrntRefutPat name arms) nonVrntTy = do
+    return $ Err $ RootCause msg
+      where msg = "The variant pattern" +++ code pat +++ "can't be bound to something of type" ++ code nonVrntTy
 
 instance CheckType (Ast.Seq Ast.Expr) where
 
@@ -332,6 +355,30 @@ instance CheckType Ast.Expr where
       (_, Err err) -> return $ condRes *> (Err err `addError` msg)
         where msg = "The two branches of this `if` expression have different types"
       _ -> return $ condRes <* bodyRes
+
+  infer (Ast.MatchF scrut arms :@: loc) = do
+    scrutRes <- infer scrut
+    case scrutRes of
+      Ok scrut'@(_ :<: DestructureNoAlias scrutTy) -> do
+        armsRes <- sequenceA <$> forM arms (\(refutPat, body) -> do
+          -- Check that all patterns have same type as scrutinee.
+          patRes <- check refutPat scrutTy
+          -- And infer the types of all the arm bodies.
+          bodyRes <- infer body
+          return $ (,) <$> patRes <*> bodyRes)
+        case armsRes of
+          Ok arms' -> do
+            let armBodyTys = map (\(_, (_, DestructureNoAlias ty)) -> ty) arms'
+            let
+              reducer :: Maybe Ty -> Ty -> TyChecker (Maybe Ty)
+              reducer (Just b) a = b >||< a
+              reducer Nothing _ = return Nothing
+            retTyMaybe <- foldM reducer (Just VoidTy) armBodyTys
+            let retTyRes = unsafeToNoAlias <$> retTyMaybe `toRes` RootCause msg
+                 where msg = "The arms of a `match` statement must all have the same type"
+            -- TODO: perform exhaustiveness/usefulness checking here.
+            let arms'' = map (\(refutPat, (body, _)) -> (refutPat, body)) arms'
+            return $ (Ast.MatchF scrut' arms'' :<:) <$> retTyRes
 
   -- A while expression does NOT return the never type. This is because
   -- usually, it does not infinitely loop. It usually loops until the

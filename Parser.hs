@@ -39,6 +39,7 @@ languageDef = emptyDef
                             , "if"
                             , "then"
                             , "else"
+                            , "match"
                             , "while"
                             , "loop"
                             , "do"
@@ -67,6 +68,7 @@ languageDef = emptyDef
                             -- , "!="
                             , "++"
                             , "->"
+                            , "=>"
                             , "|"
                             ]
   }
@@ -168,6 +170,14 @@ ifExpr = spanned do
   reserved "end"
   return $ Ast.IfF cond yesBody noBody
 
+matchExpr :: Parser Ast.Expr
+matchExpr = spanned do
+  reserved "match"
+  scrutinee <- expression
+  arms <- many $ (,) <$> (reservedOp "|" *> refutPat <* reservedOp "=>") <*> seqTerminatedBy (reservedOp "|" <|> reserved "end")
+  reserved "end"
+  return $ Ast.MatchF scrutinee arms
+
 whileExpr :: Parser Ast.Expr
 whileExpr = spanned do
   reserved "while"
@@ -199,10 +209,20 @@ returnExpr = spanned $ Ast.RetF <$> (reserved "ret" *> expression)
 -- Parse a pattern.
 pat :: Parser Ast.Pat
 pat =  (Ast.VarPat <$> identifier)
-   <|> (Ast.TuplePat <$> tuplePat)
-   <?> "pattern"
-   where
-     tuplePat = braces $ sepEndBy pat comma
+   <|> (Ast.TuplePat <$> braces (sepEndBy pat comma))
+   <?> "irrefutable pattern"
+
+refutPat :: Parser Ast.RefutPat
+refutPat =  (Ast.VarRefutPat <$> identifier)
+        <|> vrntRefutPat
+        <?> "refutable pattern"
+
+vrntRefutPat :: Parser Ast.RefutPat
+vrntRefutPat = braces do
+  colon
+  name <- identifier
+  params <- sepEndBy refutPat comma
+  return $ Ast.VrntRefutPat (':' : name) params
 
 unaryOp op f = do
   start <- getPosition
@@ -301,6 +321,7 @@ semiEndedTerm =  intrinsicExpr
 
 endEndedTerm =  blockExpr
             <|> ifExpr
+            <|> matchExpr
             <|> whileExpr
             <|> loopExpr
             <|> defExpr
