@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
 
 module Tcx
   ( Tcx(..)
@@ -13,6 +14,9 @@ module Tcx
   , getFnRetTy
   , defineTyAlias
   , resolveAliasAsVrnts
+  , NoAliasTy(..)
+  , toNoAlias
+  , unsafeToNoAlias
   )
 where
 
@@ -22,9 +26,9 @@ import Control.Monad.State (State, MonadState(get, put), gets)
 import Res (Res (Ok, Err), Error (RootCause), toRes)
 import Utils (code, (+++), codeIdent)
 import Data.List (find)
-import Control.Monad (forM)
-import Control.Monad (foldM)
+import Control.Monad (foldM, forM)
 import Data.Monoid (All(All, getAll))
+import GHC.Base (Functor)
 
 type Tcx = [TcxElem]
 
@@ -174,3 +178,57 @@ resolveAliasAsVrnts name = do
     Ok other -> return $ Err $ RootCause msg
       where msg = "The type" +++ codeIdent name +++ "refers to a" +++ code other +++ "not a variant type"
     Err err -> return $ Err err
+
+-- | A Ty that's guarunteed not to have any AliasTy's. All aliases have been resolved out
+--   of the type.
+newtype NoAliasTy = DestructureNoAlias { getNoAlias :: Ty }
+
+instance Show NoAliasTy where
+  show x = show $ getNoAlias x
+
+unsafeToNoAlias :: Ty -> NoAliasTy
+unsafeToNoAlias = DestructureNoAlias
+
+toNoAlias :: Ty -> TyChecker (Res NoAliasTy)
+toNoAlias = \case
+
+  ValTy name -> return $ Ok $ DestructureNoAlias $ ValTy name
+
+  AliasTy name -> do
+    res <- resolveAlias name
+    case res of
+      Ok ty -> do
+        return $ Ok $ DestructureNoAlias ty
+      Err err -> return $ Err err
+
+  VrntTy vrnts -> do
+    vrntsRes <- forM (M.toList vrnts) $ \(ctorName, ctorParams) -> do
+      ctorParams' <- sequenceA <$> mapM toNoAlias ctorParams
+      let unwrapped = map getNoAlias <$> ctorParams'
+      return $ (ctorName,) <$> unwrapped
+    let vrnts' = M.fromList <$> sequenceA vrntsRes
+    return $ DestructureNoAlias . VrntTy <$> vrnts'
+
+  TupleTy ts -> do
+    tsRes <- forM ts $ \ty -> do
+      ty' <- toNoAlias ty
+      return $ getNoAlias <$> ty'
+    let ts' = sequenceA tsRes
+    return $ DestructureNoAlias . TupleTy <$> ts'
+
+  FnTy params ret -> do
+    paramsRes <- forM params $ \ty -> do
+      ty' <- toNoAlias ty
+      return $ getNoAlias <$> ty'
+    let params' = sequenceA paramsRes
+    retRes <- toNoAlias ret
+    let ret' = getNoAlias <$> retRes
+    let fn = FnTy <$> params' <*> ret'
+    return $ DestructureNoAlias <$> fn
+
+  ModTy m -> do
+    mRes <- forM (M.toList m) $ \(name, ty) -> do
+      ty' <- toNoAlias ty
+      return $ (name,) . getNoAlias <$> ty'
+    let m' = M.fromList <$> sequenceA mRes
+    return $ DestructureNoAlias . ModTy <$> m'

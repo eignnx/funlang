@@ -36,6 +36,7 @@ import qualified Text.ParserCombinators.Parsec.Pos as Parsec
 import           Data.List                         ( intercalate, isSuffixOf )
 import qualified Data.Map                          as M
 import qualified Data.Maybe
+import Tcx (NoAliasTy (getNoAlias), toNoAlias, unsafeToNoAlias)
 
 -- This type used to be called `Expr` (see [this commit](1)), but was rewritten
 -- to use an F-Algebra (I think that's right?), and backwards-compatible
@@ -86,7 +87,7 @@ modLevelItemTy :: TypedExpr -> Ty.Ty
 modLevelItemTy = \case
 
   DefF _ params Nothing (_ :<: bodyTy) :<: _ ->
-    Ty.FnTy (map snd params) bodyTy
+    Ty.FnTy (map snd params) $ getNoAlias bodyTy
 
   DefF _ params (Just retTy) _ :<: _ ->
     Ty.FnTy (map snd params) retTy
@@ -96,7 +97,7 @@ modLevelItemTy = \case
           pairs = zip (map getItemName items) (map modLevelItemTy items)
 
   -- Just return the type of `e` in `static x = e`.
-  LetConstF _ (exprF :<: ty) :<: _ -> ty
+  LetConstF _ (exprF :<: ty) :<: _ -> getNoAlias ty
 
   TyDefF name _ :<: _ -> Ty.AliasTy name
 

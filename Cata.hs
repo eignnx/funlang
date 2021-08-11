@@ -10,6 +10,7 @@ where
 
 import qualified Ty
 import Utils ( Span(..) )
+import Tcx (NoAliasTy)
 
 type Algebra f a = f a -> a
 
@@ -31,7 +32,7 @@ data At f = (f (At f)) :@: Span
 instance Unwrap At where
   unwrap (f :@: _) = f
 
-data RecTyped f = (f (RecTyped f)) :<: Ty.Ty
+data RecTyped f = (f (RecTyped f)) :<: NoAliasTy
 
 instance Unwrap RecTyped where
   unwrap (f :<: _) = f
