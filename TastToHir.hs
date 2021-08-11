@@ -12,6 +12,7 @@ import qualified Ty
 import           Ty                           ( isZeroSized )
 import qualified Ast
 import           Ast                          ( Typed(..) )
+import qualified Tcx
 import qualified Hir
 import           Cata                         ( RecTyped(..) )
 import qualified Comptime
@@ -23,10 +24,12 @@ import           Data.Foldable
 import qualified Data.Map.Strict               as M
 import           Data.List                     ( find )
 import           Debug.Trace                   ( trace )
+import Tcx (NoAliasTy(DestructureNoAlias))
 
 data CState = CState
-  { lbl_  :: Hir.Lbl
-  , defs_ :: [(String, Hir.Lbl, [Hir.Instr])]
+  { lbl_   :: Hir.Lbl
+  , defs_  :: [(String, Hir.Lbl, [Hir.Instr])]
+  , vrnts_ :: [Tcx.NoAliasTy]
   }
   deriving Show
 
@@ -89,7 +92,7 @@ instance Compile (Ast.Seq Ast.TypedExpr) where
 
   compile (Ast.Result expr) = compile expr
 
-  compile (Ast.Semi expr@(exprF :<: ty) seq)
+  compile (Ast.Semi expr@(exprF :<: DestructureNoAlias ty) seq)
     | isZeroSized ty = do -- Already Void type, no need to Pop.
       expr' <- compile expr
       seq' <- compile seq
@@ -129,7 +132,7 @@ instance Compile Ast.TypedExpr where
     return $ args' -- Code to push the arguments
            ++ [Hir.CallDirect lbl argC]
 
-  compile (Ast.VarF name :<: ty)
+  compile (Ast.VarF name :<: DestructureNoAlias ty)
     | isZeroSized ty = return []
     | otherwise = return [Hir.Load name]
 
@@ -191,7 +194,7 @@ instance Compile Ast.TypedExpr where
 
   -- FIXME: HACK!
   -- Intercept the call to deal with `Void` specially. https://pbs.twimg.com/media/EU0GDTVU4AY73KC?format=jpg&name=small
-  compile intr@(Ast.IntrinsicF pos "print" [arg@(_ :<: Ty.VoidTy)] :<: ty) = do
+  compile intr@(Ast.IntrinsicF pos "print" [arg@(_ :<: DestructureNoAlias Ty.VoidTy)] :<: ty) = do
     let intr = Intr.fromName "print" pos
     return [ Hir.Const $ Hir.VText "<Void>"
            , Hir.Intrinsic intr
@@ -206,14 +209,14 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.AnnF expr _ :<: ty)   = compile expr
 
-  compile (Ast.LetF pat expr@(_ :<: exprTy) :<: _)
+  compile (Ast.LetF pat expr@(_ :<: DestructureNoAlias exprTy) :<: _)
     | isZeroSized exprTy = compile expr -- Still gotta run it cause it might have side-effects.
     | otherwise = do
       expr' <- compile expr
       pat' <- compile pat
       return $ expr' ++ pat'
 
-  compile (Ast.AssignF var expr@(_ :<: exprTy) :<: ty) = do
+  compile (Ast.AssignF var expr@(_ :<: DestructureNoAlias exprTy) :<: ty) = do
     expr' <- compile expr
     let maybeStore = [Hir.Store var | not (isZeroSized exprTy)]
     return $ expr' ++ maybeStore
@@ -316,7 +319,10 @@ instance Compile Ast.RelOp where
     Ast.Gt  -> [Hir.Gt]
     Ast.Lt  -> [Hir.Lt]
 
-initialCState = CState { lbl_ = Hir.Lbl 0, defs_ = [] }
+initialCState = CState { lbl_ = Hir.Lbl 0
+                       , defs_ = []
+                       , vrnts_ = []
+                       }
 
 runCompilation :: Compile a => a -> ([Hir.Instr], CState)
 runCompilation ast = runState (compile ast) initialCState

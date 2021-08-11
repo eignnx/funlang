@@ -34,6 +34,7 @@ instance Show Ty where
   show (AliasTy name) = name
   show (VrntTy vrnts) = braces $ commaSep (uncurry f <$> M.toList vrnts)
     where f ctorName ctorParams = ctorName ++ optList ctorParams
+  show (TupleTy ts) = "Tuple" ++ list ts
   show (FnTy params ret) = list params +++ "->" +++ show ret
   show (ModTy m) = braces $ commaSep (uncurry f <$> M.toList m)
     where f name ty = name ++ ":" +++ show ty
