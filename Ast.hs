@@ -214,7 +214,7 @@ instance IsEndTerminated TypedExpr where
   isEndTerminated e = isEndTerminated $ unwrap e
 
 instance IsEndTerminated (ExprF f) where
-  isEndTerminated (IfF _ _ _) = True
+  isEndTerminated (IfF {}) = True
   isEndTerminated (WhileF _ _) = True
   isEndTerminated (LoopF _) = True
   isEndTerminated (BlockF _) = True
