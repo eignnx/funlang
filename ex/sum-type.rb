@@ -26,6 +26,6 @@ def main[] do
         intr.puts["The red component is"];   intr.dbg_int[r];
         intr.puts["The green component is"]; intr.dbg_int[g];
         intr.puts["The blue component is"];  intr.dbg_int[b];
-    | other => intr.puts["I don't know that color!"]
+    | other => intr.puts["I don't know that color!"]; # intr.dbg_int[b] # Should be scoping error!
   end
 end
