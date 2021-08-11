@@ -571,7 +571,7 @@ instance CheckType Ast.Expr where
     case exprRes of
       Ok expr'@(_ :<: DestructureNoAlias exprTy) -> ensureM (exprTy <: ty) notSubtypeMsg $ do
         return $ Ok expr'
-        where notSubtypeMsg = "The expression" +++ code expr +++ "has type" +++ code exprTy ++ ", not" +++ code ty ++ ".\n----------\n" +++ code st
+        where notSubtypeMsg = "The expression" +++ code expr +++ "has type" +++ code exprTy ++ ", not" +++ code ty
       err -> return $ err `addError` msg
         where msg = "The expression" +++ code expr +++ "doesn't typecheck"
 
