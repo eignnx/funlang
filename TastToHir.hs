@@ -26,10 +26,12 @@ import           Data.List                     ( find )
 import           Debug.Trace                   ( trace )
 import Tcx (NoAliasTy(DestructureNoAlias))
 
+type Descriminant = Int
+
 data CState = CState
   { lbl_   :: Hir.Lbl
   , defs_  :: [(String, Hir.Lbl, [Hir.Instr])]
-  , vrnts_ :: [Tcx.NoAliasTy]
+  , vrnts_ :: M.Map (String, [Tcx.NoAliasTy]) Descriminant
   }
   deriving Show
 
@@ -159,12 +161,13 @@ instance Compile Ast.TypedExpr where
           addWrite hir idx = hir ++ [Hir.MemWriteDirect idx]
 
       Ast.Vrnt name args -> do
+        let argTys = map (\(_ :<: ty) -> ty) args
+        desc <- genDescriminant name argTys
         args' <- mapM compile args
-        return $ allocation : tag ++ writes args'
+        return $ allocation : tag desc ++ writes args'
         where
           allocation = Hir.Alloc (length args + 1)
-          tag = [Hir.Const $ Hir.VInt h, Hir.MemWriteDirect 0]
-          h = 12345 -- TODO: actually impl tag
+          tag desc = [Hir.Const $ Hir.VInt desc, Hir.MemWriteDirect 0]
           writes :: [[Hir.Instr]] -> [Hir.Instr]
           writes es = concat $ zipWith addWrite es [1..]
           addWrite :: [Hir.Instr] -> Int -> [Hir.Instr]
@@ -286,6 +289,17 @@ instance Compile Ast.TypedExpr where
   compile (Ast.TyDefF name ctorDefs :<: ty) = do
     return []
 
+genDescriminant :: String -> [NoAliasTy] -> CompState Int
+genDescriminant name argTys = do
+  vrnts <- gets vrnts_
+  case M.lookup (name, argTys) vrnts of
+    Just desc -> return desc
+    Nothing -> do
+      let desc = M.size vrnts
+      let vrnts' = M.insert (name, argTys) desc vrnts
+      modify (\st -> st { vrnts_ = vrnts' })
+      return desc
+
 instance Compile Ast.UnaryOp where
   compile Ast.Not = return [Hir.Not]
   compile Ast.Neg = return [Hir.Neg]
@@ -321,7 +335,7 @@ instance Compile Ast.RelOp where
 
 initialCState = CState { lbl_ = Hir.Lbl 0
                        , defs_ = []
-                       , vrnts_ = []
+                       , vrnts_ = M.empty
                        }
 
 runCompilation :: Compile a => a -> ([Hir.Instr], CState)

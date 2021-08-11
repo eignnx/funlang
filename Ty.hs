@@ -27,7 +27,7 @@ data Ty
   | TupleTy [Ty]
   | FnTy [Ty] Ty
   | ModTy (M.Map String Ty) -- The type of a module
-  deriving Eq
+  deriving (Eq, Ord)
 
 instance Show Ty where
   show (ValTy name) = "$" ++ name

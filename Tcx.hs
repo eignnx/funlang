@@ -182,6 +182,7 @@ resolveAliasAsVrnts name = do
 -- | A Ty that's guarunteed not to have any AliasTy's. All aliases have been resolved out
 --   of the type.
 newtype NoAliasTy = DestructureNoAlias { getNoAlias :: Ty }
+  deriving (Eq, Ord)
 
 instance Show NoAliasTy where
   show x = show $ getNoAlias x
