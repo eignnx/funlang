@@ -8,6 +8,7 @@ module Tcx
   , (<:)
   , (-&&>)
   , (>||<)
+  , inNewScope
   , define
   , setFnRetTy
   , varLookup
@@ -129,6 +130,13 @@ a >||< b = do
     (False, True)  -> return $ Just a
     (True, True)   -> return $ Just a -- `a` and `b` must be equal.
     (False, False) -> return Nothing
+
+inNewScope :: TyChecker a -> TyChecker a
+inNewScope prog = do
+  st <- get -- Save old state
+  res <- prog
+  put st -- Restore old state
+  return res
 
 define :: String -> Ty -> TyChecker Ty
 define name ty = do

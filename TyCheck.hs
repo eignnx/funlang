@@ -14,7 +14,7 @@ where
 import qualified Ast
 import           Ast           ( Typed(HasTy) )
 import           Ty            ( Ty(..) )
-import           Tcx           ( TyChecker(..), (<:), (-&&>), (>||<), varLookup, define, setFnRetTy, getFnRetTy, resolveAliasAsVrnts, defineTyAlias, initTcx, NoAliasTy (getNoAlias, DestructureNoAlias), toNoAlias, unsafeToNoAlias )
+import           Tcx           ( TyChecker(..), (<:), (-&&>), (>||<), varLookup, define, setFnRetTy, getFnRetTy, resolveAliasAsVrnts, defineTyAlias, initTcx, NoAliasTy (getNoAlias, DestructureNoAlias), toNoAlias, unsafeToNoAlias, inNewScope )
 import           Utils         ( (+++), code, codeIdent, indent )
 import           Cata          ( RecTyped(..), At(..) )
 import           Res           ( Res(..), Error (RootCause), addError, toRes, ensureM )
@@ -360,7 +360,7 @@ instance CheckType Ast.Expr where
     scrutRes <- infer scrut
     case scrutRes of
       Ok scrut'@(_ :<: DestructureNoAlias scrutTy) -> do
-        armsRes <- sequenceA <$> forM arms (\(refutPat, body) -> do
+        armsRes <- sequenceA <$> forM arms (\(refutPat, body) -> inNewScope $ do
           -- Check that all patterns have same type as scrutinee.
           patRes <- check refutPat scrutTy
           -- And infer the types of all the arm bodies.
@@ -379,6 +379,7 @@ instance CheckType Ast.Expr where
             -- TODO: perform exhaustiveness/usefulness checking here.
             let arms'' = map (\(refutPat, (body, _)) -> (refutPat, body)) arms'
             return $ (Ast.MatchF scrut' arms'' :<:) <$> retTyRes
+          Err err -> return $ Err err
 
   -- A while expression does NOT return the never type. This is because
   -- usually, it does not infinitely loop. It usually loops until the
@@ -416,10 +417,10 @@ instance CheckType Ast.Expr where
   -- For when the return type IS specified.
   infer (Ast.DefF name params (Just retTy) body :@: loc) = do
     setFnRetTy retTy -- Set fn's return type.
-    st <- get -- Save current ctx
-    paramTys <- forM params $ uncurry define
-    bodyRes <- check body retTy
-    put st -- Restore old ctx
+    (paramTys, bodyRes) <- inNewScope $ do
+      paramTys <- forM params $ uncurry define
+      bodyRes <- check body retTy
+      return (paramTys, bodyRes)
     case bodyRes of
       Ok typedBody@(_ :<: DestructureNoAlias bodyTy) -> do
         define name $ FnTy paramTys bodyTy -- We MUST save the full type now.
@@ -431,10 +432,10 @@ instance CheckType Ast.Expr where
   -- For when the return type is NOT specified.
   infer (Ast.DefF name params Nothing body :@: loc) = do
     setFnRetTy NeverTy -- We don't know the fn's return type yet! FIXME: seems bad...
-    st <- get -- Save current ctx
-    paramTys <- forM params $ uncurry define
-    bodyRes <- infer body
-    put st -- Restore old ctx
+    (paramTys, bodyRes) <- inNewScope $ do
+      paramTys <- forM params $ uncurry define
+      bodyRes <- infer body
+      return (paramTys, bodyRes)
     case bodyRes of
       Ok typedBody@(_ :<: DestructureNoAlias bodyTy) -> do
         define name $ FnTy paramTys bodyTy -- We MUST save the full type now.
@@ -575,10 +576,10 @@ instance CheckType Ast.Expr where
 
   -- For when the return type IS specified.
   check (Ast.DefF name params (Just retTy) body :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    st <- get -- Save current ctx
-    paramTys <- forM params $ uncurry define
-    bodyRes <- check body retTy
-    put st -- Restore old ctx
+    (paramTys, bodyRes) <- inNewScope $ do
+      paramTys <- forM params $ uncurry define
+      bodyRes <- check body retTy
+      return (paramTys, bodyRes)
     case bodyRes of
       Ok body'@(_ :<: DestructureNoAlias bodyTy) | retTy == bodyTy -> do
         let def = Ast.DefF name params (Just retTy) body'
@@ -590,10 +591,10 @@ instance CheckType Ast.Expr where
 
   -- For when the return type is NOT specified.
   check (Ast.DefF name params Nothing body :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    st <- get -- Save current ctx
-    paramTys <- forM params $ uncurry define
-    bodyRes <- infer body
-    put st -- Restore old ctx
+    (paramTys, bodyRes) <- inNewScope $ do
+      paramTys <- forM params $ uncurry define
+      bodyRes <- infer body
+      return (paramTys, bodyRes)
     case bodyRes of
       Ok body'@(_ :<: DestructureNoAlias bodyTy) -> do
         let def = Ast.DefF name params Nothing body'
@@ -614,7 +615,6 @@ instance CheckType Ast.Expr where
   check expr ty = do
     -- Switch from checking to inferring.
     exprRes <- infer expr
-    st <- get
     case exprRes of
       Ok expr'@(_ :<: DestructureNoAlias exprTy) -> ensureM (exprTy <: ty) notSubtypeMsg $ do
         return $ Ok expr'
