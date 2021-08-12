@@ -14,6 +14,7 @@ import qualified Ast
 import           Ast                          ( Typed(..) )
 import qualified Tcx
 import qualified Hir
+import           Hir                          ( Instr((:#)) )
 import           Cata                         ( RecTyped(..) )
 import qualified Comptime
 import qualified Intr
@@ -56,7 +57,7 @@ defineFn name compilation = do
   -- Then compile body and update hir in definition.
   hir <- compilation
   defs <- gets defs_
-  let fnLbl = Hir.Label lbl `Hir.Comment` ("Start of def" +++ name)
+  let fnLbl = Hir.Label lbl :# ("Start of def" +++ name)
   let hir' = fnLbl : hir -- Label the function.
   modify $ \st -> st { defs_ = (name, lbl, hir') : defs }
   return lbl
@@ -124,6 +125,37 @@ instance Compile Ast.Pat where
 
       return $ dups ++ concat ps'
 
+instance Compile (Ast.RefutPat, Hir.Lbl, NoAliasTy) where
+
+  compile = \case
+
+    (Ast.VarRefutPat name, _, _) ->
+      return [Hir.Store name]
+
+    (Ast.VrntRefutPat name params, next, DestructureNoAlias (Ty.VrntTy vrnts)) -> do
+      -- For every sub-pattern we'll need a copy of the TOS. We'll use the
+      -- original to perform the discriminant test.
+      let dups = replicate (length params) Hir.Dup
+
+      let Just paramTys = map Tcx.unsafeToNoAlias <$> M.lookup name vrnts
+
+      -- Test the discriminant, if test fails, go to to next match arm.
+      discr <- genDiscriminant name paramTys
+      let testDiscr = [Hir.TestDiscr discr]
+      let jmpIfFalse = [Hir.JmpIfFalse next]
+
+      -- Compile all the sub-patterns
+      subPats <- forM (zip3 params paramTys [1..]) $ \(refutPat, patTy, idx) -> do
+        let projection = Hir.MemReadDirect idx 
+        instrs <- compile (refutPat, next, patTy)
+        return $ projection : instrs
+
+      return
+        $  dups
+        ++ testDiscr
+        ++ jmpIfFalse
+        ++ concat subPats
+
 instance Compile Ast.TypedExpr where
 
   compile (Ast.BlockF seq :<: ty) = compile seq
@@ -155,7 +187,7 @@ instance Compile Ast.TypedExpr where
         exprs' <- mapM compile exprs
         return $ allocation : writes exprs'
         where
-          allocation = Hir.Alloc (length exprs) `Hir.Comment` "Allocate tuple"
+          allocation = Hir.Alloc (length exprs) :# "Allocate tuple"
           writes :: [[Hir.Instr]] -> [Hir.Instr]
           writes es = concat $ zipWith addWrite es [0..]
           addWrite :: [Hir.Instr] -> Int -> [Hir.Instr]
@@ -163,11 +195,11 @@ instance Compile Ast.TypedExpr where
 
       Ast.Vrnt name args -> do
         let argTys = map (\(_ :<: ty) -> ty) args
-        desc <- genDescriminant name argTys
+        desc <- genDiscriminant name argTys
         args' <- mapM compile args
         return $ allocation : tag desc ++ writes args'
         where
-          allocation = Hir.Alloc (length args + 1) `Hir.Comment` "Allocate variant"
+          allocation = Hir.Alloc (length args + 1) :# "Allocate variant"
           tag desc = [Hir.Const $ Hir.VInt desc, Hir.MemWriteDirect 0]
           writes :: [[Hir.Instr]] -> [Hir.Instr]
           writes es = concat $ zipWith addWrite es [1..]
@@ -201,7 +233,7 @@ instance Compile Ast.TypedExpr where
     let intr = Intr.fromName name pos
     return $ join args' ++ [Hir.Intrinsic intr]
 
-  compile (Ast.NopF :<: ty) = return [Hir.Nop `Hir.Comment` "From `nop` expr"]
+  compile (Ast.NopF :<: ty) = return [Hir.Nop :# "From `nop` expr"]
 
   compile (Ast.AnnF expr _ :<: ty) = compile expr
 
@@ -228,9 +260,26 @@ instance Compile Ast.TypedExpr where
       ++ [Hir.JmpIfFalse noLbl]
       ++ yes'
       ++ [Hir.Jmp endLbl]
-      ++ [Hir.Label noLbl `Hir.Comment` "Else branch"]
+      ++ [Hir.Label noLbl :# "Else branch"]
       ++ no'
-      ++ [Hir.Label endLbl `Hir.Comment` "End of `if` expr"]
+      ++ [Hir.Label endLbl :# "End of `if` expr"]
+
+  compile (Ast.MatchF scrut@(_ :<: patTy) arms :<: ty) = do
+    matchEnd <- fresh
+    scrut'   <- compile scrut
+    arms'    <- forM arms $ \(refutPat, body) -> do
+      next      <- fresh
+      refutPat' <- compile (refutPat, next, patTy)
+      body'     <- compile body
+      return
+        $  refutPat'
+        ++ body'
+        ++ [Hir.Jmp matchEnd]
+        ++ [Hir.Label next :# "Next match branch"]
+    return
+      $  scrut'
+      ++ concat arms'
+      ++ [Hir.Label matchEnd :# "Match end"]
 
   compile (Ast.WhileF cond body :<: ty) = do
     cond' <- compile cond
@@ -238,20 +287,20 @@ instance Compile Ast.TypedExpr where
     body' <- compile body
     end   <- fresh
     return
-      $  [Hir.Label top `Hir.Comment` "Top of while loop"]
+      $  [Hir.Label top :# "Top of while loop"]
       ++ cond'
       ++ [Hir.JmpIfFalse end]
       ++ body'
       ++ [Hir.Jmp top]
-      ++ [Hir.Label end `Hir.Comment` "End of while loop"]
+      ++ [Hir.Label end :# "End of while loop"]
 
   compile (Ast.LoopF body :<: ty) = do
     top   <- fresh
     body' <- compile body
     return
-      $  [Hir.Label top `Hir.Comment` "Loop top"]
+      $  [Hir.Label top :# "Loop top"]
       ++ body'
-      ++ [Hir.Jmp top `Hir.Comment` "Jump to top of loop"]
+      ++ [Hir.Jmp top :# "Jump to top of loop"]
 
   compile (Ast.ModF name items :<: ty) = do
 
@@ -273,7 +322,7 @@ instance Compile Ast.TypedExpr where
       let paramBindings = map Hir.Store $ reverse params
       let prologue = paramBindings -- First thing we do is store args (from stack) in memory.
       body' <- compile body
-      let epilogue = [Hir.Ret `Hir.Comment` ("End of def" +++ name)] -- At the end of every function MUST be a return instr.
+      let epilogue = [Hir.Ret :# ("End of def" +++ name)] -- At the end of every function MUST be a return instr.
       return $ prologue -- First run the prologue.
             ++ body'    -- Then run the body of the function.
             ++ epilogue -- Finally, run the epilogue.
@@ -282,8 +331,8 @@ instance Compile Ast.TypedExpr where
   compile (Ast.TyDefF name ctorDefs :<: ty) = do
     return []
 
-genDescriminant :: String -> [NoAliasTy] -> CompState Int
-genDescriminant name argTys = do
+genDiscriminant :: String -> [NoAliasTy] -> CompState Int
+genDiscriminant name argTys = do
   vrnts <- gets vrnts_
   case M.lookup (name, argTys) vrnts of
     Just desc -> return desc
@@ -299,10 +348,10 @@ instance Compile Ast.UnaryOp where
   compile (Ast.TupleProj idx) = return [Hir.MemReadDirect $ fromIntegral idx]
 
 instance Compile Ast.BinOp where
-  compile (Ast.ArithOp   op) = compile op
-  compile (Ast.BoolOp    op) = compile op
-  compile (Ast.RelOp     op) = compile op
-  compile (Ast.OtherOp   op) = compile op
+  compile (Ast.ArithOp op) = compile op
+  compile (Ast.BoolOp  op) = compile op
+  compile (Ast.RelOp   op) = compile op
+  compile (Ast.OtherOp op) = compile op
 
 instance Compile Ast.BoolOp where
   compile op = return $ case op of

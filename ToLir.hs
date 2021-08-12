@@ -9,6 +9,7 @@ import qualified Hir
 import qualified Lir
 
 import qualified Data.Map.Strict               as M
+import Hir (Instr((:#)))
 
 -------------------------TRANSLATING FROM Hir.Instr------------------
 
@@ -29,7 +30,7 @@ findLbls instrs = go instrs 0 M.empty
   go (instr : instrs) instrIdx labels = case instr of
     Hir.Label lbl -> go instrs (instrIdx + 1) labels'
       where labels' = M.insert lbl instrIdx labels
-    Hir.Comment instr _ -> go (instr:instrs) instrIdx labels
+    instr :# _ -> go (instr:instrs) instrIdx labels
     _ -> go instrs (instrIdx + 1) labels
 
 -------------------------SECOND PASS-------------------------------
@@ -61,6 +62,7 @@ translateInstr labels instr = case instr of
   Hir.Alloc n             -> Lir.Alloc n
   Hir.MemWriteDirect idx  -> Lir.MemWriteDirect idx
   Hir.MemReadDirect  idx  -> Lir.MemReadDirect idx
+  Hir.TestDiscr  discr    -> Lir.TestDiscr discr
   Hir.Label      lbl      -> Lir.Nop -- Labels are translated to no-ops.
   Hir.JmpIfFalse lbl      -> Lir.JmpIfFalse $ translateLbl labels lbl
   Hir.Jmp        lbl      -> Lir.Jmp $ translateLbl labels lbl
@@ -69,7 +71,7 @@ translateInstr labels instr = case instr of
   Hir.CallDirect lbl argC -> Lir.CallDirect (translateLbl labels lbl) argC
   Hir.Ret                 -> Lir.Ret
   Hir.Nop                 -> Lir.Nop
-  Hir.Comment instr _     -> translateInstr labels instr
+  instr :# _     -> translateInstr labels instr
 
 translateLbl :: LblMap -> Hir.Lbl -> Lir.InstrAddr
 translateLbl labels lbl =

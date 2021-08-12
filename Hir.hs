@@ -49,6 +49,7 @@ data Instr
   | Alloc Int -- `Alloc n` allocates a contiguous block of memory of size `n`.
   | MemWriteDirect Int -- `MemWriteDirect i` performs `(TOS+1)[i] = TOS`.
   | MemReadDirect Int  -- `MemReadDirect  i` performs `(TOS)[i]`.
+  | TestDiscr Int -- Tests the discriminant field of a variant.
   | Nop
   | JmpIfFalse Lbl
   | Jmp Lbl
@@ -58,5 +59,5 @@ data Instr
              -- TOS-values as args
   | CallDirect Lbl Int -- Calls a function whose type is `Fixed[a -> b]`.
   | Ret -- Jump back to return address
-  | Comment Instr String
+  | Instr :# String -- Represents a comment in the Hir. Will be dropped in Lir.
   deriving (Show)

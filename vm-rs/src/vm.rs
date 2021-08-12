@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{self, Write}
+    io::{self, Write},
 };
 
 use crate::instr::{Ident, Instr, InstrAddr, Intrinsic, Value};
@@ -18,7 +18,8 @@ impl Heap {
     fn alloc(&mut self, slots: usize) -> usize {
         let idx = self.mem.len();
         // Extend and fill the new part with zeros.
-        self.mem.resize_with(self.mem.len() + slots, || Value::VInt(0));
+        self.mem
+            .resize_with(self.mem.len() + slots, || Value::VInt(0));
         idx
     }
 }
@@ -129,7 +130,6 @@ impl Vm {
 
     fn run_intrinsic(&mut self, intr: &Intrinsic) {
         match intr {
-
             Intrinsic::EqInt => {
                 let x = self.pop_int();
                 let y = self.pop_int();
@@ -320,6 +320,15 @@ impl Vm {
                 let buf_start = self.pop_ptr();
                 let val = heap.mem[buf_start + offset].clone();
                 self.push(val);
+            }
+
+            Instr::TestDiscr(discr) => {
+                let ptr = self.pop_ptr();
+                match &heap.mem[ptr] {
+                    Value::VInt(d) if *d as usize == *discr => self.push(Value::VBool(true)),
+                    Value::VInt(_) => self.push(Value::VBool(false)),
+                    x => panic!("Expected VInt for discriminant, got {:?}!", x),
+                }
             }
 
             Instr::Nop => {}
