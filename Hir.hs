@@ -58,4 +58,5 @@ data Instr
              -- TOS-values as args
   | CallDirect Lbl Int -- Calls a function whose type is `Fixed[a -> b]`.
   | Ret -- Jump back to return address
+  | Comment Instr String
   deriving (Show)
