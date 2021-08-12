@@ -26,9 +26,14 @@ end
 - [X] Compile a (somewhat) high-level language down to bytecode that can be run on a virtual machine
     - [X] Implement basic operations, and control flow statements
     - [X] Implement function calls
-    - [X] Implement lexical scoping for blocks
+    - [ ] Implement lexical scoping for blocks
     - [ ] Implement closures
 - [ ] Add a bidirectional type-checking algorithm
   - [X] Implement non-polymorphic type checking
   - [ ] Implement polymorphic type checking
 - [ ] Add algebraic data types
+  - [X] Impl basic variant types
+  - [X] Impl tuple types
+  - [X] Impl record types (currently called Mod types)
+    - [ ] Call them records instead
+  - [ ] Allow recursive types
