@@ -196,18 +196,27 @@ instance Show NoAliasTy where
   show x = show $ getNoAlias x
 
 unsafeToNoAlias :: Ty -> NoAliasTy
-unsafeToNoAlias = DestructureNoAlias
+unsafeToNoAlias ty
+  | trulyHasNoAliases ty = DestructureNoAlias ty
+  | otherwise = error $ "`unsafeToNoAlias` is unsafe on" +++ code ty
+    where trulyHasNoAliases = \case
+            AliasTy _ -> False
+            ValTy _ -> True
+            VrntTy vrnts -> all trulyHasNoAliases $ concat $ M.elems vrnts
+            TupleTy comps -> all trulyHasNoAliases comps
+            FnTy params ret -> all trulyHasNoAliases params && trulyHasNoAliases ret
+            ModTy m -> all trulyHasNoAliases $ M.elems m
 
 toNoAlias :: Ty -> TyChecker (Res NoAliasTy)
 toNoAlias = \case
 
-  ValTy name -> return $ Ok $ DestructureNoAlias $ ValTy name
+  ValTy name -> return $ Ok $ unsafeToNoAlias $ ValTy name
 
   AliasTy name -> do
     res <- resolveAlias name
     case res of
       Ok ty -> do
-        return $ Ok $ DestructureNoAlias ty
+        toNoAlias ty -- Make sure we recursively remove any aliases from result.
       Err err -> return $ Err err
 
   VrntTy vrnts -> do
@@ -216,14 +225,14 @@ toNoAlias = \case
       let unwrapped = map getNoAlias <$> ctorParams'
       return $ (ctorName,) <$> unwrapped
     let vrnts' = M.fromList <$> sequenceA vrntsRes
-    return $ DestructureNoAlias . VrntTy <$> vrnts'
+    return $ unsafeToNoAlias . VrntTy <$> vrnts'
 
   TupleTy ts -> do
     tsRes <- forM ts $ \ty -> do
       ty' <- toNoAlias ty
       return $ getNoAlias <$> ty'
     let ts' = sequenceA tsRes
-    return $ DestructureNoAlias . TupleTy <$> ts'
+    return $ unsafeToNoAlias . TupleTy <$> ts'
 
   FnTy params ret -> do
     paramsRes <- forM params $ \ty -> do
@@ -233,11 +242,11 @@ toNoAlias = \case
     retRes <- toNoAlias ret
     let ret' = getNoAlias <$> retRes
     let fn = FnTy <$> params' <*> ret'
-    return $ DestructureNoAlias <$> fn
+    return $ unsafeToNoAlias <$> fn
 
   ModTy m -> do
     mRes <- forM (M.toList m) $ \(name, ty) -> do
       ty' <- toNoAlias ty
       return $ (name,) . getNoAlias <$> ty'
     let m' = M.fromList <$> sequenceA mRes
-    return $ DestructureNoAlias . ModTy <$> m'
+    return $ unsafeToNoAlias . ModTy <$> m'

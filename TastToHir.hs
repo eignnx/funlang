@@ -18,7 +18,7 @@ import           Hir                          ( Instr((:#)) )
 import           Cata                         ( RecTyped(..) )
 import qualified Comptime
 import qualified Intr
-import Utils ( (+++), codeIdent )
+import Utils ( (+++), codeIdent, optList, braces )
 
 import           Control.Monad.State
 import           Data.Foldable
@@ -133,26 +133,23 @@ instance Compile (Ast.RefutPat, Hir.Lbl, NoAliasTy) where
       return [Hir.Store name]
 
     (Ast.VrntRefutPat name params, next, DestructureNoAlias (Ty.VrntTy vrnts)) -> do
-      -- For every sub-pattern we'll need a copy of the TOS. We'll use the
-      -- original to perform the discriminant test.
-      let dups = replicate (length params) Hir.Dup
-
       let Just paramTys = map Tcx.unsafeToNoAlias <$> M.lookup name vrnts
 
       -- Test the discriminant, if test fails, go to to next match arm.
       discr <- genDiscriminant name paramTys
-      let testDiscr = [Hir.TestDiscr discr]
-      let jmpIfFalse = [Hir.JmpIfFalse next]
+      let testDiscr = [Hir.TestDiscr discr :# ("Discriminant for" +++ braces (name ++ optList paramTys))]
+      let jmpIfFalse = [Hir.JmpIfFalse next :# "Jmp to next match arm if test fails"]
 
       -- Compile all the sub-patterns
       subPats <- forM (zip3 params paramTys [1..]) $ \(refutPat, patTy, idx) -> do
-        let projection = Hir.MemReadDirect idx 
-        instrs <- compile (refutPat, next, patTy)
-        return $ projection : instrs
+        refutPat' <- compile (refutPat, next, patTy)
+        return
+          $ (Hir.Dup :# "We need a copy of local scrutinee from which to project")
+          : (Hir.MemReadDirect idx :# ("Project the" +++ show (idx-1) ++ "th variant field"))
+          : refutPat'
 
       return
-        $  dups
-        ++ testDiscr
+        $  testDiscr
         ++ jmpIfFalse
         ++ concat subPats
 
@@ -187,24 +184,29 @@ instance Compile Ast.TypedExpr where
         exprs' <- mapM compile exprs
         return $ allocation : writes exprs'
         where
-          allocation = Hir.Alloc (length exprs) :# "Allocate tuple"
+          n = length exprs
+          allocation = Hir.Alloc n :# ("Allocate an" +++ show n ++ "-tuple")
           writes :: [[Hir.Instr]] -> [Hir.Instr]
           writes es = concat $ zipWith addWrite es [0..]
           addWrite :: [Hir.Instr] -> Int -> [Hir.Instr]
-          addWrite hir idx = hir ++ [Hir.MemWriteDirect idx]
+          addWrite hir idx = hir ++ [Hir.MemWriteDirect idx :# ("Initialize the" +++ show idx ++ "th tuple field")]
 
       Ast.Vrnt name args -> do
         let argTys = map (\(_ :<: ty) -> ty) args
         desc <- genDiscriminant name argTys
         args' <- mapM compile args
-        return $ allocation : tag desc ++ writes args'
+        return $ allocation : tag desc argTys ++ writes args'
         where
-          allocation = Hir.Alloc (length args + 1) :# "Allocate variant"
-          tag desc = [Hir.Const $ Hir.VInt desc, Hir.MemWriteDirect 0]
+          n = length args
+          allocation = Hir.Alloc (n + 1) :# ("Allocate variant that has" +++ show n +++ "fields")
+          tag desc argTys =
+            [Hir.Const (Hir.VInt desc) :# ("Discriminant for" +++ braces (name ++ optList argTys))
+            , Hir.MemWriteDirect 0
+            ]
           writes :: [[Hir.Instr]] -> [Hir.Instr]
           writes es = concat $ zipWith addWrite es [1..]
           addWrite :: [Hir.Instr] -> Int -> [Hir.Instr]
-          addWrite hir idx = hir ++ [Hir.MemWriteDirect idx]
+          addWrite hir idx = hir ++ [Hir.MemWriteDirect idx :# ("Initialize the" +++ show (idx-1) ++ "th variant field")]
 
   compile (Ast.UnaryF op expr :<: ty) = do
     expr' <- compile expr
@@ -272,9 +274,11 @@ instance Compile Ast.TypedExpr where
       refutPat' <- compile (refutPat, next, patTy)
       body'     <- compile body
       return
-        $  refutPat'
+        $  [Hir.Dup :# "Make a copy of scrutinee for next arm"]
+        ++ refutPat'
+        ++ [Hir.Pop :# "Next arm will not be reached, pop its copy of scrutinee"]
         ++ body'
-        ++ [Hir.Jmp matchEnd]
+        ++ [Hir.Jmp matchEnd :# "Break out of match"]
         ++ [Hir.Label next :# "Next match branch"]
     return
       $  scrut'
@@ -289,7 +293,7 @@ instance Compile Ast.TypedExpr where
     return
       $  [Hir.Label top :# "Top of while loop"]
       ++ cond'
-      ++ [Hir.JmpIfFalse end]
+      ++ [Hir.JmpIfFalse end :# "Jmp to end ofwhile loop"]
       ++ body'
       ++ [Hir.Jmp top]
       ++ [Hir.Label end :# "End of while loop"]
@@ -360,14 +364,14 @@ instance Compile Ast.BoolOp where
     -- A xor B   = (A or B) and (not (A and B))
     -- [postfix] = (A B or) ((A B and) not) and
     Ast.Xor ->
-      [ Hir.Over
+      [ Hir.Over :# "Begin Xor"
       , Hir.Over
       , Hir.Or
       , Hir.Rot
       , Hir.Rot
       , Hir.And
       , Hir.Not
-      , Hir.And
+      , Hir.And :# "End Xor"
       ]
 
 instance Compile Ast.RelOp where
@@ -386,8 +390,8 @@ runCompilation ast = runState (compile ast) initialCState
 trampoline :: [(String, Hir.Lbl, [Hir.Instr])] -> [Hir.Instr]
 trampoline defs = entryPointJump ++ exit
   where
-    exit = [Hir.Intrinsic Intr.Exit]
-    entryPointJump = [Hir.CallDirect mainLbl 0]
+    exit = [Hir.Intrinsic Intr.Exit :# "Upon return from main, exit"]
+    entryPointJump = [Hir.CallDirect mainLbl 0 :# "Call main"]
       where
         mainLbl = case find (\(name, _, _) -> name == "main") defs of
                     Just (_, lbl, _) -> lbl
