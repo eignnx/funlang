@@ -4,21 +4,36 @@ It's a fun language-side-project (not that I have a real project to work on tho)
 
 ## What it Looks Like
 ```ruby
-# fib[n] = fib[n-1] + fib[n-2]
+type NamedColor
+  | :Red
+  | :Green
+  | :Blue
+  | :Cyan
+  | :Magenta
+  | :Yellow
+  | :Black
+  | :White
+end
 
-def fib[n: Int] -> Int do
-  if n < 2 then
-    n
-  else
-    fib[n - 2] + fib[n - 1]
-  end
+type Color
+  | :Rgb Int, Int, Int
+  | :Hsb Int, Int, Int
+  | NamedColor
 end
 
 def main[] do
-  let n = 20;
-  intr.print["Working..."];
-  intr.print[fib[n]];
-  intr.print["Done!"];
+  let green = { :Green } as NamedColor;
+  let color = { :Rgb 50, 100, 200 } as Color;
+  color = green; # Note: allowed because NamedColor <: Color.
+
+  match color
+    | { :Red } => intr.puts["I love red!"]
+    | { :Rgb r, g, b } =>
+        intr.puts["The red component is"];   intr.dbg_int[r];
+        intr.puts["The green component is"]; intr.dbg_int[g];
+        intr.puts["The blue component is"];  intr.dbg_int[b];
+    | other => intr.puts["I don't know that color!"];
+  end
 end
 ```
 
