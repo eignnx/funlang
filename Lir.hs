@@ -62,6 +62,7 @@ data Instr
   | Alloc Int
   | MemWriteDirect Int
   | MemReadDirect Int
+  | TestDiscr Int
   | Nop -- Used to replace labels
   | JmpIfFalse InstrAddr
   | Jmp InstrAddr
@@ -94,6 +95,7 @@ instance Show Instr where
     Alloc n -> "Alloc" +++ show n
     MemWriteDirect n -> "MemWriteDirect" +++ show n
     MemReadDirect n -> "MemReadDirect" +++ show n
+    TestDiscr d -> "TestDiscr" +++ show d
     Nop -> "Nop"
     JmpIfFalse addr -> "JmpIfFalse" +++ show addr
     Jmp addr -> "Jmp" +++ show addr

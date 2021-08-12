@@ -50,6 +50,7 @@ fn decode_instr(segments: &[&str]) -> Instr {
         ["Alloc", n] => Alloc(n.parse().unwrap()),
         ["MemWriteDirect", idx] => MemWriteDirect(idx.parse().unwrap()),
         ["MemReadDirect", idx] => MemReadDirect(idx.parse().unwrap()),
+        ["TestDiscr", discr] => TestDiscr(discr.parse().unwrap()),
         ["Nop"] => Nop,
         ["JmpIfFalse", addr] => JmpIfFalse(addr.parse().unwrap()),
         ["Jmp", addr] => Jmp(addr.parse().unwrap()),
@@ -89,6 +90,7 @@ pub enum Instr {
     Alloc(usize),
     MemWriteDirect(usize),
     MemReadDirect(usize),
+    TestDiscr(usize),
     Nop, // Used to replace labels
     JmpIfFalse(InstrAddr),
     Jmp(InstrAddr),
