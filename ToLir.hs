@@ -29,6 +29,7 @@ findLbls instrs = go instrs 0 M.empty
   go (instr : instrs) instrIdx labels = case instr of
     Hir.Label lbl -> go instrs (instrIdx + 1) labels'
       where labels' = M.insert lbl instrIdx labels
+    Hir.Comment instr _ -> go (instr:instrs) instrIdx labels
     _ -> go instrs (instrIdx + 1) labels
 
 -------------------------SECOND PASS-------------------------------
@@ -57,9 +58,9 @@ translateInstr labels instr = case instr of
   Hir.Gt                  -> Lir.Gt
   Hir.Lt                  -> Lir.Lt
   Hir.Concat              -> Lir.Concat
-  Hir.Alloc      n        -> Lir.Alloc n
-  Hir.MemWriteDirect   idx      -> Lir.MemWriteDirect idx
-  Hir.MemReadDirect    idx      -> Lir.MemReadDirect idx
+  Hir.Alloc n             -> Lir.Alloc n
+  Hir.MemWriteDirect idx  -> Lir.MemWriteDirect idx
+  Hir.MemReadDirect  idx  -> Lir.MemReadDirect idx
   Hir.Label      lbl      -> Lir.Nop -- Labels are translated to no-ops.
   Hir.JmpIfFalse lbl      -> Lir.JmpIfFalse $ translateLbl labels lbl
   Hir.Jmp        lbl      -> Lir.Jmp $ translateLbl labels lbl
@@ -68,6 +69,7 @@ translateInstr labels instr = case instr of
   Hir.CallDirect lbl argC -> Lir.CallDirect (translateLbl labels lbl) argC
   Hir.Ret                 -> Lir.Ret
   Hir.Nop                 -> Lir.Nop
+  Hir.Comment instr _     -> translateInstr labels instr
 
 translateLbl :: LblMap -> Hir.Lbl -> Lir.InstrAddr
 translateLbl labels lbl =
@@ -79,8 +81,8 @@ translateValue :: LblMap
                -> Hir.Value
                -> Lir.Value
 translateValue labels = \case
-  Hir.VInt x -> Lir.VInt x
-  Hir.VBool x -> Lir.VBool x
-  Hir.VText x -> Lir.VText x
+  Hir.VInt x   -> Lir.VInt x
+  Hir.VBool x  -> Lir.VBool x
+  Hir.VText x  -> Lir.VText x
   Hir.VLbl lbl -> Lir.VInstrAddr $ translateLbl labels lbl
   Hir.VPtr idx -> Lir.VPtr idx

@@ -56,7 +56,8 @@ defineFn name compilation = do
   -- Then compile body and update hir in definition.
   hir <- compilation
   defs <- gets defs_
-  let hir' = Hir.Label lbl : hir -- Label the function.
+  let fnLbl = Hir.Label lbl `Hir.Comment` ("Start of def" +++ name)
+  let hir' = fnLbl : hir -- Label the function.
   modify $ \st -> st { defs_ = (name, lbl, hir') : defs }
   return lbl
 
@@ -154,7 +155,7 @@ instance Compile Ast.TypedExpr where
         exprs' <- mapM compile exprs
         return $ allocation : writes exprs'
         where
-          allocation = Hir.Alloc (length exprs)
+          allocation = Hir.Alloc (length exprs) `Hir.Comment` "Allocate tuple"
           writes :: [[Hir.Instr]] -> [Hir.Instr]
           writes es = concat $ zipWith addWrite es [0..]
           addWrite :: [Hir.Instr] -> Int -> [Hir.Instr]
@@ -166,7 +167,7 @@ instance Compile Ast.TypedExpr where
         args' <- mapM compile args
         return $ allocation : tag desc ++ writes args'
         where
-          allocation = Hir.Alloc (length args + 1)
+          allocation = Hir.Alloc (length args + 1) `Hir.Comment` "Allocate variant"
           tag desc = [Hir.Const $ Hir.VInt desc, Hir.MemWriteDirect 0]
           writes :: [[Hir.Instr]] -> [Hir.Instr]
           writes es = concat $ zipWith addWrite es [1..]
@@ -195,22 +196,14 @@ instance Compile Ast.TypedExpr where
            ++ fn' -- Code to load the function pointer
            ++ [Hir.Call argC]
 
-  -- FIXME: HACK!
-  -- Intercept the call to deal with `Void` specially. https://pbs.twimg.com/media/EU0GDTVU4AY73KC?format=jpg&name=small
-  compile intr@(Ast.IntrinsicF pos "print" [arg@(_ :<: DestructureNoAlias Ty.VoidTy)] :<: ty) = do
-    let intr = Intr.fromName "print" pos
-    return [ Hir.Const $ Hir.VText "<Void>"
-           , Hir.Intrinsic intr
-           ]
-
   compile (Ast.IntrinsicF pos name args :<: ty) = do
     args' <- mapM compile args
     let intr = Intr.fromName name pos
     return $ join args' ++ [Hir.Intrinsic intr]
 
-  compile (Ast.NopF :<: ty)            = return [Hir.Nop]
+  compile (Ast.NopF :<: ty) = return [Hir.Nop `Hir.Comment` "From `nop` expr"]
 
-  compile (Ast.AnnF expr _ :<: ty)   = compile expr
+  compile (Ast.AnnF expr _ :<: ty) = compile expr
 
   compile (Ast.LetF pat expr@(_ :<: DestructureNoAlias exprTy) :<: _)
     | isZeroSized exprTy = compile expr -- Still gotta run it cause it might have side-effects.
@@ -235,9 +228,9 @@ instance Compile Ast.TypedExpr where
       ++ [Hir.JmpIfFalse noLbl]
       ++ yes'
       ++ [Hir.Jmp endLbl]
-      ++ [Hir.Label noLbl]
+      ++ [Hir.Label noLbl `Hir.Comment` "Else branch"]
       ++ no'
-      ++ [Hir.Label endLbl]
+      ++ [Hir.Label endLbl `Hir.Comment` "End of `if` expr"]
 
   compile (Ast.WhileF cond body :<: ty) = do
     cond' <- compile cond
@@ -245,20 +238,20 @@ instance Compile Ast.TypedExpr where
     body' <- compile body
     end   <- fresh
     return
-      $  [Hir.Label top]
+      $  [Hir.Label top `Hir.Comment` "Top of while loop"]
       ++ cond'
       ++ [Hir.JmpIfFalse end]
       ++ body'
       ++ [Hir.Jmp top]
-      ++ [Hir.Label end]
+      ++ [Hir.Label end `Hir.Comment` "End of while loop"]
 
   compile (Ast.LoopF body :<: ty) = do
     top   <- fresh
     body' <- compile body
     return
-      $  [Hir.Label top]
+      $  [Hir.Label top `Hir.Comment` "Loop top"]
       ++ body'
-      ++ [Hir.Jmp top]
+      ++ [Hir.Jmp top `Hir.Comment` "Jump to top of loop"]
 
   compile (Ast.ModF name items :<: ty) = do
 
@@ -280,7 +273,7 @@ instance Compile Ast.TypedExpr where
       let paramBindings = map Hir.Store $ reverse params
       let prologue = paramBindings -- First thing we do is store args (from stack) in memory.
       body' <- compile body
-      let epilogue = [Hir.Ret] -- At the end of every function MUST be a return instr.
+      let epilogue = [Hir.Ret `Hir.Comment` ("End of def" +++ name)] -- At the end of every function MUST be a return instr.
       return $ prologue -- First run the prologue.
             ++ body'    -- Then run the body of the function.
             ++ epilogue -- Finally, run the epilogue.
