@@ -167,7 +167,17 @@ data Lit e
   | Unit
   | Tuple [e]
   | Vrnt String [e]
-  deriving (Show, Functor)
+  deriving Functor
+
+instance Show e => Show (Lit e) where
+  show = \case
+    Bool True -> "true"
+    Bool False -> "false"
+    Int i -> show i
+    Text txt -> show txt
+    Unit -> "nop"
+    Tuple args -> braces $ commaSep (map show args)
+    Vrnt name args -> braces $ name ++ optList args
 
 data UnaryOp
   = Not
@@ -241,12 +251,7 @@ showParams params = intercalate ", " $ map pairFmt params
 
 instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) where
   show (VarF name) = name
-  show (LiteralF lit) = case lit of
-    Int x -> show x
-    Bool x -> if x then "true" else "false"
-    Text x -> show x
-    Tuple xs -> "{" ++ commaSep (map show xs) ++ "}"
-    Vrnt name args -> braces (name +++ commaSep (map show args))
+  show (LiteralF lit) = show lit
   show (UnaryF Not x) = "not " ++ show x
   show (UnaryF Neg x) = "-(" ++ show x ++ ")"
   show (UnaryF (TupleProj idx) x) = show x ++ "." ++ show idx
