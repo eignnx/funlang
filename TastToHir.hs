@@ -332,7 +332,7 @@ instance Compile Ast.TypedExpr where
             ++ epilogue -- Finally, run the epilogue.
     return []
 
-  compile (Ast.TyDefF name ctorDefs :<: ty) = do
+  compile (Ast.TyDefF _ name ctorDefs :<: ty) = do
     return []
 
 genDiscriminant :: String -> [NoAliasTy] -> CompState Int

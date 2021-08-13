@@ -23,6 +23,7 @@ import           Debug.Trace          ( trace )
 import qualified Data.Char            as Char
 import           System.FilePath      ( takeBaseName )
 import qualified Data.Functor.Identity
+import Data.Functor (($>))
 
 languageDef = emptyDef
   { Token.commentStart    = "{#"
@@ -33,6 +34,7 @@ languageDef = emptyDef
   , Token.identLetter     = alphaNum <|> oneOf "_"
   , Token.reservedNames   = [ "mod"
                             , "type"
+                            , "rec"
                             , "def"
                             , "let"
                             , "const"
@@ -116,10 +118,11 @@ modExpr = spanned do
 tyDefExpr :: Parser Ast.Expr
 tyDefExpr = spanned do
   reserved "type"
+  isRec <- option Ast.NotRec $ reserved "rec" $> Ast.IsRec
   name <- identifier
   ctorDefs <- many $ reservedOp "|" *> tyCmpntDef
   reserved "end"
-  return $ Ast.TyDefF name ctorDefs
+  return $ Ast.TyDefF isRec name ctorDefs
 
 tyCmpntDef :: Parser Ast.TyCmpntDef
 tyCmpntDef = vrntDef <|> subTyDef
@@ -127,9 +130,11 @@ tyCmpntDef = vrntDef <|> subTyDef
     vrntDef = do
       colon
       name <- identifier
-      components <- sepEndBy ty comma
+      components <- sepEndBy maybeRecTy comma
       return $ Ast.VrntDef (':' : name) components
     subTyDef = Ast.SubTyDef <$> identifier
+    maybeRecTy =  try (Ast.NonRecTy <$> ty)
+              <|> reserved "rec" $> Ast.Rec
 
 -- ```
 -- def my_fn[arg1, arg2, ...] do
@@ -156,7 +161,9 @@ defExpr = spanned do
 
 ty :: Parser Ty.Ty
 ty =  try (Ty.TupleTy <$> (symbol "Tuple" *> brackets (sepEndBy ty comma)))
+  <|> (Ty.AliasTy <$> (reserved "rec" *> identifier))
   <|> (Ty.AliasTy <$> identifier)
+  <|> (Ty.FnTy <$> brackets (sepEndBy ty comma) <*> (reservedOp "->" *> ty))
   <?> "type"
 
 ifExpr :: Parser Ast.Expr
