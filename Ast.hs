@@ -12,6 +12,8 @@ module Ast
   , isModLevelItem
   , modLevelItemTy
   , TyCmpntDef(..)
+  , IsRec(..)
+  , MaybeRecTy(..)
   , Pat(..)
   , RefutPat(..)
   , Seq(..)
@@ -64,25 +66,25 @@ data ExprF r
   | AnnF r Ty.Ty
   | DefF String [(String, Ty.Ty)] (Maybe Ty.Ty) r
   | ModF String [r]
-  | TyDefF String [TyCmpntDef]
+  | TyDefF IsRec String [TyCmpntDef]
   deriving Functor
 
 type Expr = At ExprF
 
 itemName :: ExprF r -> Maybe String
 itemName = \case
-  DefF name _ _ _  -> Just name
-  ModF name _      -> Just name
-  LetConstF name _ -> Just name
-  TyDefF name _   -> Just name
-  _               -> Nothing
+  DefF name _ _ _   -> Just name
+  ModF name _       -> Just name
+  LetConstF name _  -> Just name
+  TyDefF _ name _   -> Just name
+  _                 -> Nothing
 
 isModLevelItem :: ExprF r -> Bool
 isModLevelItem = \case
   DefF {}       -> True
   ModF _ _      -> True
   LetConstF _ _ -> True
-  TyDefF _ _   -> True
+  TyDefF {}     -> True
   _             -> False
 
 modLevelItemTy :: TypedExpr -> Ty.Ty
@@ -101,16 +103,25 @@ modLevelItemTy = \case
   -- Just return the type of `e` in `static x = e`.
   LetConstF _ (exprF :<: ty) :<: _ -> getNoAlias ty
 
-  TyDefF name _ :<: _ -> Ty.AliasTy name
+  TyDefF NotRec name _ :<: _ -> Ty.AliasTy name
+  TyDefF IsRec  name _ :<: _ -> Ty.RecTy ("?" ++ name) (Ty.AliasTy name)
 
 data TyCmpntDef
-  = VrntDef String [Ty.Ty]
+  = VrntDef String [MaybeRecTy]
   | SubTyDef String
 
 instance Show TyCmpntDef where
   show = \case
     VrntDef name tys -> name +++ commaSep (map show tys)
     SubTyDef name -> name
+
+data MaybeRecTy
+  = NonRecTy Ty.Ty
+  | Rec
+  deriving Show
+
+data IsRec = IsRec | NotRec
+  deriving Show
 
 -- Represents a pattern.
 data Pat
@@ -286,8 +297,9 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
     "def" +++ name ++ "[" ++ showParams paramsAndTys ++ "] =" +++ indent (show body)
   show (ModF name items) =
     "mod" +++ name ++ indent (intercalate "\n\n" (map show items)) ++ "\nend"
-  show (TyDefF name ctorDefs) =
-    "type" +++ name ++ indent (intercalate "\n" (map (("|"+++) . show) ctorDefs)) ++ "\nend"
+  show (TyDefF isRec name ctorDefs) = let
+    recness = case isRec of IsRec -> "rec "; NotRec -> ""
+    in "type" +++ recness ++ name ++ indent (intercalate "\n" (map (("|"+++) . show) ctorDefs)) ++ "\nend"
 
 instance Show TypedExpr where
   show (e :<: t) = "(" ++ show e +++ ":<:" +++ show t ++ ")"

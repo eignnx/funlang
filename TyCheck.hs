@@ -477,9 +477,12 @@ instance CheckType Ast.Expr where
           Ast.LetConstF name _ :@: loc -> do
             define name NeverTy
             return $ Ok ()
-          Ast.TyDefF tyName defs :@: loc -> do
+          Ast.TyDefF Ast.NotRec tyName defs :@: loc -> do
             let
-              f (Ast.VrntDef name tys) = return $ Ok $ M.singleton name tys
+              f (Ast.VrntDef name tys) = return $ Ok $ M.singleton name (map g tys)
+                where g = \case
+                        Ast.NonRecTy ty -> ty
+                        _ -> error "Can't use type `rec` in a non `rec` type!"
               f (Ast.SubTyDef name) = resolveAliasAsVrnts name
             cmpntsUnjoined <- sequenceA <$> mapM f defs
             case mconcat <$> cmpntsUnjoined of
@@ -488,11 +491,27 @@ instance CheckType Ast.Expr where
                 defineTyAlias tyName vrntTy
                 return $ Ok ()
               Err err -> return $ Err err
+          Ast.TyDefF Ast.IsRec tyName defs :@: loc -> do
+            let recTyName = "?" ++ tyName
+            let
+              f (Ast.VrntDef name tys) = return $ Ok $ M.singleton name (map g tys)
+                where g = \case
+                        Ast.NonRecTy ty -> ty
+                        Ast.Rec -> TyVar recTyName
+              f (Ast.SubTyDef name) = resolveAliasAsVrnts name
+            cmpntsUnjoined <- sequenceA <$> mapM f defs
+            case mconcat <$> cmpntsUnjoined of
+              Ok cmpnts -> do
+                let vrntTy = VrntTy cmpnts
+                let recTy = RecTy recTyName vrntTy
+                defineTyAlias tyName recTy
+                return $ Ok ()
+              Err err -> return $ Err err
           other -> return $ Err $ RootCause msg
             where msg = "I can't let you put the expression" +++ code other +++ "at the top-level of a module.")
 
-  infer (Ast.TyDefF name defs :@: loc) = do
-    return $ Ok $ Ast.TyDefF name defs :<: unsafeToNoAlias VoidTy
+  infer (Ast.TyDefF isRec name defs :@: loc) = do
+    return $ Ok $ Ast.TyDefF isRec name defs :<: unsafeToNoAlias VoidTy
 
   -- -- Default case.
   -- infer expr = return $ Err $ RootCause $ msg
