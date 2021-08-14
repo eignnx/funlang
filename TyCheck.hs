@@ -374,7 +374,7 @@ instance CheckType Ast.Expr where
               reducer (Just b) a = b >||< a
               reducer Nothing _ = return Nothing
             retTyMaybe <- foldM reducer (Just VoidTy) armBodyTys
-            let retTyRes = unsafeToNoAlias <$> retTyMaybe `toRes` RootCause msg
+            let retTyRes = unsafeToNoAlias . (scrutTy -&&>) <$> retTyMaybe `toRes` RootCause msg
                  where msg = "The arms of a `match` statement must all have the same type"
             -- TODO: perform exhaustiveness/usefulness checking here.
             let arms'' = map (\(refutPat, (body, _)) -> (refutPat, body)) arms'
