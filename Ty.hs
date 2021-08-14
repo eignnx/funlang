@@ -34,13 +34,13 @@ data Ty
 instance Show Ty where
   show (ValTy name) = "$" ++ name
   show (AliasTy name) = name
-  show (VrntTy vrnts) = braces $ commaSep (uncurry f <$> M.toList vrnts)
-    where f ctorName ctorParams = ctorName ++ optList ctorParams
+  show (VrntTy vrnts) = braces $ intercalate " | " (uncurry f <$> M.toList vrnts)
+    where f ctorName ctorParams = ctorName +++ commaSep (map show ctorParams)
   show (TupleTy ts) = "Tuple" ++ list ts
   show (FnTy params ret) = list params +++ "->" +++ show ret
   show (ModTy m) = braces $ commaSep (uncurry f <$> M.toList m)
     where f name ty = name ++ ":" +++ show ty
-  show (RecTy x body) = "rec" +++ show (TyVar x) ++ "{" +++ show body +++ "}"
+  show (RecTy x body) = "rec" +++ show (TyVar x) +++ "{" +++ show body +++ "}"
   show (TyVar name) = name
 
 pattern NeverTy = ValTy "Never"

@@ -14,6 +14,7 @@ module Tcx
   , varLookup
   , getFnRetTy
   , defineTyAlias
+  , resolveAsVrnts
   , resolveAliasAsVrnts
   , NoAliasTy(..)
   , toNoAlias
@@ -23,19 +24,22 @@ where
 
 import Ty (Ty(..))
 import qualified Data.Map as M
-import Control.Monad.State (State, MonadState(get, put), gets)
+import Control.Monad.State (State, MonadState(get, put), gets, modify, lift)
 import Res (Res (Ok, Err), Error (RootCause), toRes)
 import Utils (code, (+++), codeIdent)
 import Data.List (find)
-import Control.Monad (foldM, forM)
+import Control.Monad (foldM, forM, join, liftM, filterM)
 import Data.Monoid (All(All, getAll))
 import GHC.Base (Functor)
+import Data.Maybe (fromJust, isJust)
+import Debug.Trace (trace, traceM)
 
 type Tcx = [TcxElem]
 
 data TcxElem
   = VarBind String Ty
   | AliasBind String Ty
+  | TyVarBind String Ty
   deriving (Show, Eq)
 
 tcxLookupVar :: String -> Tcx -> Maybe Ty
@@ -67,15 +71,16 @@ AliasTy name <: ty = do
   tyRes <- resolveAlias name
   case tyRes of
     Ok resolved -> resolved <: ty
-    Err err -> return $ error $ show err
+    Err err -> error $ show err
 
 ty <: AliasTy name = do
   tyRes <- resolveAlias name
   case tyRes of
     Ok resolved -> ty <: resolved
-    Err err -> return $ error $ show err
+    Err err -> error $ show err
 
 VrntTy vs1 <: VrntTy vs2 = do
+  () <- traceM $ ">>>>>>>>>>>> vrnt subtype:" +++ code (VrntTy vs1, VrntTy vs2)
   isSubmapOfM ctorSubtype vs1 vs2
   where ctorSubtype ts1 ts2 = TupleTy ts1 <: TupleTy ts2
 
@@ -92,6 +97,32 @@ FnTy xs1 y1 <: FnTy xs2 y2 = do
         allSupertypes False _ = return False
 
 ModTy m1 <: ModTy m2 = return $ m2 `M.isSubmapOf` m1
+
+r1@(RecTy x1 t1) <: r2@(RecTy x2 t2) = do
+  modify $ \tcx -> TyVarBind x1 r1 : TyVarBind x2 r2 : tcx
+  t1 <: t2
+
+r@(RecTy x body) <: ty = do
+  modify $ \tcx -> TyVarBind x r : tcx
+  body <: ty
+
+ty <: r@(RecTy x body) = do
+  modify $ \tcx -> TyVarBind x r : tcx
+  ty <: body
+
+TyVar x <: ty = do
+  repl <- gets (head . concatMap search)
+  repl <: ty
+  where
+    search (TyVarBind x' ty) | x == x' = [ty]
+    search _ = []
+
+ty <: TyVar x = do
+  repl <- gets (head . concatMap search)
+  ty <: repl
+  where
+    search (TyVarBind x' ty) | x == x' = [ty]
+    search _ = []
 
 _ <: _ = return False
 
@@ -129,7 +160,9 @@ a >||< b = do
     (True, False)  -> return $ Just b
     (False, True)  -> return $ Just a
     (True, True)   -> return $ Just a -- `a` and `b` must be equal.
-    (False, False) -> return Nothing
+    (False, False) -> do
+      () <- traceM $ ">>>>>>>>>>>>>>>>>>>>>>>>> >||< failure:" +++ code (a, b)
+      return Nothing
 
 inNewScope :: TyChecker a -> TyChecker a
 inNewScope prog = do
@@ -178,14 +211,40 @@ resolveAlias name = do
       AliasBind n2 ty -> n1 == n2
       _ -> False
 
+resolveAsVrnts :: Ty -> TyChecker (Res (M.Map String [Ty]))
+resolveAsVrnts = \case
+  VrntTy vrnts -> return $ Ok vrnts
+  AliasTy name -> resolveAliasAsVrnts name
+  TyVar name -> do
+    res <- resolveTyVar name
+    case res of
+      Ok ty -> resolveAsVrnts ty
+      Err err -> return $ Err err
+  r@(RecTy x body) -> do
+    modify $ \tcx -> TyVarBind x r : tcx
+    resolveAsVrnts body
+  other -> return $ Err $ RootCause msg
+    where msg = "I was expecting a variant type, but got" +++ code other
+
 resolveAliasAsVrnts :: String -> TyChecker (Res (M.Map String [Ty]))
 resolveAliasAsVrnts name = do
   res <- resolveAlias name
-  case res of
-    Ok (VrntTy vrnts) -> return $ Ok vrnts
-    Ok other -> return $ Err $ RootCause msg
-      where msg = "The type" +++ codeIdent name +++ "refers to a" +++ code other +++ "not a variant type"
-    Err err -> return $ Err err
+  return $ res >>= assumeVrnt
+
+assumeVrnt :: Ty -> Res (M.Map String [Ty])
+assumeVrnt = \case
+  VrntTy vrnts -> Ok vrnts
+  other -> Err $ RootCause msg
+    where msg = "I was expecting a variant type, but got" +++ code other
+
+resolveTyVar :: String -> TyChecker (Res Ty)
+resolveTyVar name = do
+  -- TODO: report errors from `fromJust` and `head`
+  found <- gets (head . fromJust . mapM findTyVar)
+  return $ Ok found
+  where
+    findTyVar (TyVarBind x ty) | x == name = Just ty
+    findTyVar _ = Nothing
 
 -- | A Ty that's guarunteed not to have any AliasTy's. All aliases have been resolved out
 --   of the type.
@@ -206,6 +265,8 @@ unsafeToNoAlias ty
             TupleTy comps -> all trulyHasNoAliases comps
             FnTy params ret -> all trulyHasNoAliases params && trulyHasNoAliases ret
             ModTy m -> all trulyHasNoAliases $ M.elems m
+            RecTy tyVar body -> trulyHasNoAliases body
+            TyVar name -> True
 
 toNoAlias :: Ty -> TyChecker (Res NoAliasTy)
 toNoAlias = \case
@@ -250,3 +311,10 @@ toNoAlias = \case
       return $ (name,) . getNoAlias <$> ty'
     let m' = M.fromList <$> sequenceA mRes
     return $ unsafeToNoAlias . ModTy <$> m'
+
+  RecTy tyVar body -> do
+    bodyRes <- toNoAlias body
+    return $ unsafeToNoAlias . RecTy tyVar . getNoAlias <$> bodyRes
+
+  TyVar name ->
+    return $ Ok $ unsafeToNoAlias $ TyVar name

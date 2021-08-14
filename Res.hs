@@ -38,6 +38,10 @@ instance Applicative Res where
   liftA2 f (Err e) (Ok x) = Err e
   liftA2 f (Ok x) (Err e) = Err e
 
+instance Monad Res where
+  (Ok x) >>= f = f x
+  (Err e) >>= f = Err e
+
 data Error
   = RootCause String
   | ResultingError String Error

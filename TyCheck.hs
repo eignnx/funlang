@@ -14,7 +14,7 @@ where
 import qualified Ast
 import           Ast           ( Typed(HasTy) )
 import           Ty            ( Ty(..) )
-import           Tcx           ( TyChecker(..), (<:), (-&&>), (>||<), varLookup, define, setFnRetTy, getFnRetTy, resolveAliasAsVrnts, defineTyAlias, initTcx, NoAliasTy (getNoAlias, DestructureNoAlias), toNoAlias, unsafeToNoAlias, inNewScope )
+import           Tcx           ( TyChecker(..), (<:), (-&&>), (>||<), varLookup, define, setFnRetTy, getFnRetTy, resolveAliasAsVrnts, defineTyAlias, initTcx, NoAliasTy (getNoAlias, DestructureNoAlias), toNoAlias, unsafeToNoAlias, inNewScope, resolveAsVrnts )
 import           Utils         ( (+++), code, codeIdent, indent )
 import           Cata          ( RecTyped(..), At(..) )
 import           Res           ( Res(..), Error (RootCause), addError, toRes, ensureM )
@@ -54,7 +54,7 @@ instance CheckType Ast.Pat where
 
   check pat@(Ast.TuplePat ps) nonTupleTy =
     return $ Err $ RootCause msg
-      where msg = "The tuple pattern" +++ code pat +++ "can't be bound to something of type" ++ code nonTupleTy
+      where msg = "The tuple pattern" +++ code pat +++ "can't be bound to something of type" +++ code nonTupleTy
 
 instance CheckType Ast.RefutPat where
   type Checked Ast.RefutPat = Ast.RefutPat
@@ -65,18 +65,18 @@ instance CheckType Ast.RefutPat where
     define name ty
     return $ Ok $ Ast.VarRefutPat name
 
-  check pat@(Ast.VrntRefutPat name params) (VrntTy vrnts) = do
-    case M.lookup name vrnts of
-      Just expectedParamTys -> do
-        paramsRes <- sequenceA <$> forM (zip params expectedParamTys) (\(param, expectedTy) -> do
-          check param expectedTy)
-        return $ Ast.VrntRefutPat name <$> paramsRes
-      Nothing -> return $ Err $ RootCause msg
-        where msg = "I don't know what" +++ codeIdent name +++ "refers to in the pattern" +++ code pat
-
-  check pat@(Ast.VrntRefutPat name arms) nonVrntTy = do
-    return $ Err $ RootCause msg
-      where msg = "The variant pattern" +++ code pat +++ "can't be bound to something of type" ++ code nonVrntTy
+  check pat@(Ast.VrntRefutPat name params) someVrnt = do
+    vrntsRes <- resolveAsVrnts someVrnt
+    case vrntsRes of
+      Err err -> return $ Err err
+      Ok vrnts ->
+        case M.lookup name vrnts of
+          Nothing -> return $ Err $ RootCause msg
+            where msg = "I don't know what" +++ codeIdent name +++ "refers to in the pattern" +++ code pat
+          Just expectedParamTys -> do
+            paramsRes <- sequenceA <$> forM (zip params expectedParamTys) (\(param, expectedTy) -> do
+              check param expectedTy)
+            return $ Ast.VrntRefutPat name <$> paramsRes
 
 instance CheckType (Ast.Seq Ast.Expr) where
 
@@ -103,7 +103,14 @@ instance CheckType (Ast.Seq Ast.Expr) where
         return $ Ok (semi, ty)
       _ -> return (eRes *> seqRes)
 
-  check = undefined
+  check seq ty = do
+    seqRes <- infer seq
+    case seqRes of
+      Ok (seq', DestructureNoAlias actual) -> do
+        ensureM (actual <: ty) "" $ do
+          tyRes <- toNoAlias ty
+          return $ (seq',) <$> tyRes
+
 
 -- | Takes a Foldable sequence of typed exprs and merges their types via `-&&>`.
 --   Example:
@@ -356,30 +363,30 @@ instance CheckType Ast.Expr where
         where msg = "The two branches of this `if` expression have different types"
       _ -> return $ condRes <* bodyRes
 
-  infer (Ast.MatchF scrut arms :@: loc) = do
-    scrutRes <- infer scrut
-    case scrutRes of
-      Ok scrut'@(_ :<: DestructureNoAlias scrutTy) -> do
-        armsRes <- sequenceA <$> forM arms (\(refutPat, body) -> inNewScope $ do
-          -- Check that all patterns have same type as scrutinee.
-          patRes <- check refutPat scrutTy
-          -- And infer the types of all the arm bodies.
-          bodyRes <- infer body
-          return $ (,) <$> patRes <*> bodyRes)
-        case armsRes of
-          Ok arms' -> do
-            let armBodyTys = map (\(_, (_, DestructureNoAlias ty)) -> ty) arms'
-            let
-              reducer :: Maybe Ty -> Ty -> TyChecker (Maybe Ty)
-              reducer (Just b) a = b >||< a
-              reducer Nothing _ = return Nothing
-            retTyMaybe <- foldM reducer (Just VoidTy) armBodyTys
-            let retTyRes = unsafeToNoAlias . (scrutTy -&&>) <$> retTyMaybe `toRes` RootCause msg
-                 where msg = "The arms of a `match` statement must all have the same type"
-            -- TODO: perform exhaustiveness/usefulness checking here.
-            let arms'' = map (\(refutPat, (body, _)) -> (refutPat, body)) arms'
-            return $ (Ast.MatchF scrut' arms'' :<:) <$> retTyRes
-          Err err -> return $ Err err
+  -- infer (Ast.MatchF scrut arms :@: loc) = do
+  --   scrutRes <- infer scrut
+  --   case scrutRes of
+  --     Ok scrut'@(_ :<: DestructureNoAlias scrutTy) -> do
+  --       armsRes <- sequenceA <$> forM arms (\(refutPat, body) -> inNewScope $ do
+  --         -- Check that all patterns have same type as scrutinee.
+  --         patRes <- check refutPat scrutTy
+  --         -- And infer the types of all the arm bodies.
+  --         bodyRes <- infer body
+  --         return $ (,) <$> patRes <*> bodyRes)
+  --       case armsRes of
+  --         Ok arms' -> do
+  --           let armBodyTys = map (\(_, (_, DestructureNoAlias ty)) -> ty) arms'
+  --           let
+  --             reducer :: Maybe Ty -> Ty -> TyChecker (Maybe Ty)
+  --             reducer (Just b) a = b >||< a
+  --             reducer Nothing _ = return Nothing
+  --           retTyMaybe <- foldM reducer (Just NeverTy) armBodyTys
+  --           let retTyRes = unsafeToNoAlias . (scrutTy -&&>) <$> retTyMaybe `toRes` RootCause msg
+  --                where msg = "The arms of a `match` statement must all have the same type"
+  --           -- TODO: perform exhaustiveness/usefulness checking here.
+  --           let arms'' = map (\(refutPat, (body, _)) -> (refutPat, body)) arms'
+  --           return $ (Ast.MatchF scrut' arms'' :<:) <$> retTyRes
+  --         Err err -> return $ Err err
 
   -- A while expression does NOT return the never type. This is because
   -- usually, it does not infinitely loop. It usually loops until the
@@ -539,6 +546,31 @@ instance CheckType Ast.Expr where
       (_, Err yesErr, Err noErr) -> return $ Err yesErr *> Err noErr
       (_, _, Err noErr) -> return $ Err noErr
       (_, Err yesErr, _) -> return $ Err yesErr
+
+  check (Ast.MatchF scrut arms :@: loc) ty = do
+    scrutRes <- infer scrut
+    case scrutRes of
+      Ok scrut'@(_ :<: DestructureNoAlias scrutTy) -> do
+        armsRes <- sequenceA <$> forM arms (\(refutPat, body) -> inNewScope $ do
+          -- Check that all patterns have same type as scrutinee.
+          patRes <- check refutPat scrutTy
+          -- And infer the types of all the arm bodies.
+          bodyRes <- check body ty
+          return $ (,) <$> patRes <*> bodyRes)
+        case armsRes of
+          Ok arms' -> do
+            let armBodyTys = map (\(_, (_, DestructureNoAlias ty)) -> ty) arms'
+            let
+              reducer :: Maybe Ty -> Ty -> TyChecker (Maybe Ty)
+              reducer (Just b) a = b >||< a
+              reducer Nothing _ = return Nothing
+            retTyMaybe <- foldM reducer (Just NeverTy) armBodyTys
+            let retTyRes = unsafeToNoAlias . (scrutTy -&&>) <$> retTyMaybe `toRes` RootCause msg
+                 where msg = "The arms of a `match` statement must all have the same type"
+            -- TODO: perform exhaustiveness/usefulness checking here.
+            let arms'' = map (\(refutPat, (body, _)) -> (refutPat, body)) arms'
+            return $ (Ast.MatchF scrut' arms'' :<:) <$> retTyRes
+          Err err -> return $ Err err
 
 --   -- check ctx fn@(FnExpr param body) (FnTy paramTy retTy) =
 --   --   let pName = paramName param
