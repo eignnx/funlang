@@ -32,7 +32,7 @@ type Descriminant = Int
 data CState = CState
   { lbl_   :: Hir.Lbl
   , defs_  :: [(String, Hir.Lbl, [Hir.Instr])]
-  , vrnts_ :: M.Map (String, [Tcx.NoAliasTy]) Descriminant
+  , vrnts_ :: M.Map (String, Int) Descriminant
   }
   deriving Show
 
@@ -161,7 +161,7 @@ instance Compile (Ast.RefutPat, Hir.Lbl, NoAliasTy) where
 
       -- Test the discriminant, if test fails, go to to next match arm.
       discr <- genDiscriminant name paramTys
-      let testDiscr = [Hir.TestDiscr discr :# ("Discriminant for" +++ braces (name ++ optList paramTys))]
+      let testDiscr = [Hir.TestDiscr discr :# ("Discriminant for" +++ braces (name ++ "/" ++ show (length paramTys)))]
       let jmpIfFalse = [Hir.JmpIfFalse next :# "Jmp to next match arm if test fails"]
 
       -- Compile all the sub-patterns
@@ -248,7 +248,7 @@ instance Compile Ast.TypedExpr where
           n = length args
           allocation = Hir.Alloc (n + 1) :# ("Allocate variant that has" +++ show n +++ "fields")
           tag desc argTys =
-            [Hir.Const (Hir.VInt desc) :# ("Discriminant for" +++ braces (name ++ optList argTys))
+            [Hir.Const (Hir.VInt desc) :# ("Discriminant for" +++ braces (name ++ "/" ++ show (length argTys)))
             , Hir.MemWriteDirect 0
             ]
           writes :: [[Hir.Instr]] -> [Hir.Instr]
@@ -378,11 +378,11 @@ instance Compile Ast.TypedExpr where
 genDiscriminant :: String -> [NoAliasTy] -> CompState Int
 genDiscriminant name argTys = do
   vrnts <- gets vrnts_
-  case M.lookup (name, argTys) vrnts of
+  case M.lookup (name, length argTys) vrnts of
     Just desc -> return desc
     Nothing -> do
       let desc = M.size vrnts
-      let vrnts' = M.insert (name, argTys) desc vrnts
+      let vrnts' = M.insert (name, length argTys) desc vrnts
       modify (\st -> st { vrnts_ = vrnts' })
       return desc
 
