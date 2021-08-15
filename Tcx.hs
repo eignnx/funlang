@@ -80,7 +80,6 @@ ty <: AliasTy name = do
     Err err -> error $ show err
 
 VrntTy vs1 <: VrntTy vs2 = do
-  () <- traceM $ ">>>>>>>>>>>> vrnt subtype:" +++ code (VrntTy vs1, VrntTy vs2)
   isSubmapOfM ctorSubtype vs1 vs2
   where ctorSubtype ts1 ts2 = TupleTy ts1 <: TupleTy ts2
 
@@ -161,7 +160,6 @@ a >||< b = do
     (False, True)  -> return $ Just a
     (True, True)   -> return $ Just a -- `a` and `b` must be equal.
     (False, False) -> do
-      () <- traceM $ ">>>>>>>>>>>>>>>>>>>>>>>>> >||< failure:" +++ code (a, b)
       return Nothing
 
 inNewScope :: TyChecker a -> TyChecker a
