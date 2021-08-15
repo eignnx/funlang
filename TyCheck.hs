@@ -107,9 +107,10 @@ instance CheckType (Ast.Seq Ast.Expr) where
     seqRes <- infer seq
     case seqRes of
       Ok (seq', DestructureNoAlias actual) -> do
-        ensureM (actual <: ty) "" $ do
+        ensureM (actual <: ty) msg $ do
           tyRes <- toNoAlias ty
           return $ (seq',) <$> tyRes
+        where msg = "Block has type" +++ code actual +++ "not" +++ code ty
 
 
 -- | Takes a Foldable sequence of typed exprs and merges their types via `-&&>`.
