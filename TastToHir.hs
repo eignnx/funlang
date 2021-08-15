@@ -25,7 +25,7 @@ import           Data.Foldable
 import qualified Data.Map.Strict               as M
 import           Data.List                     ( find )
 import           Debug.Trace                   ( trace )
-import Tcx (NoAliasTy(DestructureNoAlias))
+import Tcx (NoAliasTy(DestructureNoAlias), unsafeToNoAlias)
 
 type Descriminant = Int
 
@@ -53,21 +53,26 @@ declareFn name = do
 
 defineFn :: String -> CompState [Hir.Instr] -> CompState Hir.Lbl
 defineFn name compilation = do
-  lbl <- lookupFnLbl name
-  -- Then compile body and update hir in definition.
-  hir <- compilation
-  defs <- gets defs_
-  let fnLbl = Hir.Label lbl :# ("Start of def" +++ name)
-  let hir' = fnLbl : hir -- Label the function.
-  modify $ \st -> st { defs_ = (name, lbl, hir') : defs }
-  return lbl
+  maybeLbl <- lookupFnLbl name
+  case maybeLbl of
+    Just lbl -> do
+      -- Then compile body and update hir in definition.
+      hir  <- compilation
+      defs <- gets defs_
+      let fnLbl = Hir.Label lbl :# ("Start of def" +++ name)
+      let hir' = fnLbl : hir -- Label the function.
+      modify $ \st -> st { defs_ = (name, lbl, hir') : defs }
+      return lbl
 
-lookupFnLbl :: String -> CompState Hir.Lbl
+-- Returns the label associated with a statically-defined function.
+-- Returns `Nothing` the function is not statically known.
+lookupFnLbl :: String -> CompState (Maybe Hir.Lbl)
 lookupFnLbl name = do
   defs <- gets defs_
-  case find (\(n, _, _) -> n == name) defs of
-    Just (_, lbl, _) -> return lbl
-    Nothing -> error $ "Internal Compiler Error: Unknown fn binding" +++ codeIdent name
+  let asdf = getLbl <$> find (nameEq name) defs
+  return asdf
+  where getLbl (_, lbl, _) = lbl
+        nameEq name (n, _, _) = n == name
 
 class Compile a where
   compile :: a -> CompState [Hir.Instr]
@@ -132,6 +137,25 @@ instance Compile (Ast.RefutPat, Hir.Lbl, NoAliasTy) where
     (Ast.VarRefutPat name, _, _) ->
       return [Hir.Store name]
 
+    (ast@(Ast.VrntRefutPat name params), next, DestructureNoAlias (Ty.RecTy x body)) -> do
+      let body' = unfoldRecTy x body
+      compile (ast, next, unsafeToNoAlias body')
+      where
+        unfoldRecTy :: String -> Ty.Ty -> Ty.Ty
+        unfoldRecTy x body = go body
+        go = \case
+          Ty.TyVar y
+            | x == y -> body
+            | otherwise -> Ty.TyVar y
+          Ty.RecTy y yBody
+            | y == x -> Ty.RecTy y yBody
+            | otherwise -> Ty.RecTy y $ go body
+          Ty.TupleTy ts -> Ty.TupleTy $ map go ts
+          Ty.VrntTy vs -> Ty.VrntTy $ M.map (go <$>) vs
+          Ty.ModTy m -> Ty.ModTy $ M.map go m
+          Ty.FnTy params ret -> Ty.FnTy (map go params) (go ret)
+          atomic -> atomic
+
     (Ast.VrntRefutPat name params, next, DestructureNoAlias (Ty.VrntTy vrnts)) -> do
       let Just paramTys = map Tcx.unsafeToNoAlias <$> M.lookup name vrnts
 
@@ -159,10 +183,34 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.CallF (Ast.VarF name :<: f) args :<: resTy) = do
     args' <- compile args -- Using `instance Compile a => Compile [a]`
-    lbl <- lookupFnLbl name -- FIXME: Ensure this works when fn names are shadowed.
+    maybeRes <- lookupFnLbl name -- FIXME: Ensure this works when fn names are shadowed.
+    let argC = length args
+    case maybeRes of
+      Just lbl -> do
+        return
+          $  args' -- Code to push the arguments
+          ++ [Hir.CallDirect lbl argC]
+      Nothing -> do
+        fn' <- compile (Ast.VarF name :<: f)
+        return $ args' -- Code to push the arguments
+              ++ fn' -- Code to load the function pointer
+              ++ [Hir.Call argC]
+
+  compile (Ast.CallF fn args :<: ty) = do
+    args' <- compile args -- Using `instance Compile a => Compile [a]`
+    fn' <- compile fn
     let argC = length args
     return $ args' -- Code to push the arguments
-           ++ [Hir.CallDirect lbl argC]
+           ++ fn' -- Code to load the function pointer
+           ++ [Hir.Call argC]
+
+  compile (Ast.VarF name :<: DestructureNoAlias (Ty.FnTy _ _)) = do
+    maybeLbl <- lookupFnLbl name
+    case maybeLbl of
+      Just lbl -> do
+        return [Hir.Const $ Hir.VLbl lbl]
+      Nothing -> do
+        return [Hir.Load name]
 
   compile (Ast.VarF name :<: DestructureNoAlias ty)
     | isZeroSized ty = return []
@@ -221,14 +269,6 @@ instance Compile Ast.TypedExpr where
     return $ y' ++ x' ++ op'
 
   compile (Ast.RetF expr :<: ty) = compile expr
-
-  compile (Ast.CallF fn args :<: ty) = do
-    args' <- compile args -- Using `instance Compile a => Compile [a]`
-    fn' <- compile fn
-    let argC = length args
-    return $ args' -- Code to push the arguments
-           ++ fn' -- Code to load the function pointer
-           ++ [Hir.Call argC]
 
   compile (Ast.IntrinsicF pos name args :<: ty) = do
     args' <- mapM compile args

@@ -520,9 +520,9 @@ instance CheckType Ast.Expr where
   infer (Ast.TyDefF isRec name defs :@: loc) = do
     return $ Ok $ Ast.TyDefF isRec name defs :<: unsafeToNoAlias VoidTy
 
-  -- -- Default case.
-  -- infer expr = return $ Err $ RootCause $ msg
-  --   where msg = "I don't have enough information to infer the type of" +++ code expr
+  -- Default case.
+  infer expr = return $ Err $ RootCause $ msg
+    where msg = "I don't have enough information to infer the type of" +++ code expr
 
   check :: Ast.Expr -> Ty -> TyChecker (Res Ast.TypedExpr)
 
