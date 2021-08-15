@@ -21,6 +21,7 @@ import           Data.List                      ( find, isPrefixOf, stripPrefix 
 import           Control.Monad                  ( when, forM_ )
 import           Text.Printf                    ( printf )
 import System.IO (hPutStr, hClose, hPutStrLn)
+import Hir (Instr((:#)))
 
 data VmImpl = Hs | Rs
   deriving (Show, Eq)
@@ -138,7 +139,11 @@ printTypedAst :: Ast.TypedExpr -> IO ()
 printTypedAst tast = print tast
 
 printHir :: [Hir.Instr] -> IO ()
-printHir hir = putStrLn $ unlines $ map show hir
+printHir hir = putStrLn $ unlines $ map f hir
+  where
+    f instr@(Hir.Label _ :# _) = show instr
+    f instr@(Hir.Label _) = show instr
+    f instr = "  " ++ show instr
 
 printLir :: [Lir.Instr] -> IO ()
 printLir lir = putStrLn $ unlines $ zipWith fmt [0..] lir
