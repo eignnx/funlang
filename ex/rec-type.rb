@@ -15,7 +15,7 @@ def map[f: [Int] -> Int, xs: rec IntList] -> rec IntList do
   match xs
     | { :Nil } => { :Nil }
     | { :Cons x, xs } => { :Cons f[x], map[f, xs] }
-  end as rec IntList
+  end
 end
 
 def dbg_int_list[xs: rec IntList] do
