@@ -103,15 +103,27 @@ instance CheckType (Ast.Seq Ast.Expr) where
         return $ Ok (semi, ty)
       _ -> return (eRes *> seqRes)
 
-  check seq ty = do
-    seqRes <- infer seq
-    case seqRes of
-      Ok (seq', DestructureNoAlias actual) -> do
-        ensureM (actual <: ty) msg $ do
-          tyRes <- toNoAlias ty
-          return $ (seq',) <$> tyRes
-        where msg = "Block has type" +++ code actual +++ "not" +++ code ty
+  check Ast.Empty ty = ensureM (ty <: VoidTy) msg $ do
+    return $ Ok (Ast.Empty, unsafeToNoAlias VoidTy)
+    where msg = "An empty sequence has type" +++ code VoidTy +++ "not" +++ code ty
 
+  check (Ast.Result e) ty = do
+    eRes <- check e ty
+    case eRes of
+      Ok e'@(_ :<: ty) -> do
+        let result = Ast.Result e'
+        return $ Ok (result, ty)
+      Err err -> return $ Err err
+
+  check (Ast.Semi e seq) ty = do
+    eRes <- check e VoidTy
+    seqRes <- check seq ty
+    case (eRes, seqRes) of
+      (Ok e'@(_ :<: DestructureNoAlias eTy), Ok (seq', DestructureNoAlias seqTy)) -> do
+        let semi = Ast.Semi e' seq'
+        let ty = unsafeToNoAlias $ eTy -&&> seqTy
+        return $ Ok (semi, ty)
+      _ -> return (eRes *> seqRes)
 
 -- | Takes a Foldable sequence of typed exprs and merges their types via `-&&>`.
 --   Example:
@@ -364,31 +376,6 @@ instance CheckType Ast.Expr where
         where msg = "The two branches of this `if` expression have different types"
       _ -> return $ condRes <* bodyRes
 
-  -- infer (Ast.MatchF scrut arms :@: loc) = do
-  --   scrutRes <- infer scrut
-  --   case scrutRes of
-  --     Ok scrut'@(_ :<: DestructureNoAlias scrutTy) -> do
-  --       armsRes <- sequenceA <$> forM arms (\(refutPat, body) -> inNewScope $ do
-  --         -- Check that all patterns have same type as scrutinee.
-  --         patRes <- check refutPat scrutTy
-  --         -- And infer the types of all the arm bodies.
-  --         bodyRes <- infer body
-  --         return $ (,) <$> patRes <*> bodyRes)
-  --       case armsRes of
-  --         Ok arms' -> do
-  --           let armBodyTys = map (\(_, (_, DestructureNoAlias ty)) -> ty) arms'
-  --           let
-  --             reducer :: Maybe Ty -> Ty -> TyChecker (Maybe Ty)
-  --             reducer (Just b) a = b >||< a
-  --             reducer Nothing _ = return Nothing
-  --           retTyMaybe <- foldM reducer (Just NeverTy) armBodyTys
-  --           let retTyRes = unsafeToNoAlias . (scrutTy -&&>) <$> retTyMaybe `toRes` RootCause msg
-  --                where msg = "The arms of a `match` statement must all have the same type"
-  --           -- TODO: perform exhaustiveness/usefulness checking here.
-  --           let arms'' = map (\(refutPat, (body, _)) -> (refutPat, body)) arms'
-  --           return $ (Ast.MatchF scrut' arms'' :<:) <$> retTyRes
-  --         Err err -> return $ Err err
-
   -- A while expression does NOT return the never type. This is because
   -- usually, it does not infinitely loop. It usually loops until the
   -- condition is no longer true, then ends, yielding void.
@@ -527,6 +514,14 @@ instance CheckType Ast.Expr where
 
   check :: Ast.Expr -> Ty -> TyChecker (Res Ast.TypedExpr)
 
+
+  check (Ast.BlockF seq :@: loc) ty = do
+    seqRes <- check seq ty
+    case seqRes of
+      Ok (seq', ty) -> return $ Ok $ Ast.BlockF seq' :<: ty
+      Err err -> return $ Err err `addError` msg
+        where msg = "I can't type check the block at" +++ show loc
+
   -- An `if` expression has two sequentially-executed sub-expressions:
   --  1. The conditional expression, and
   --  2. (One of) the branches.
@@ -565,9 +560,9 @@ instance CheckType Ast.Expr where
               reducer :: Maybe Ty -> Ty -> TyChecker (Maybe Ty)
               reducer (Just b) a = b >||< a
               reducer Nothing _ = return Nothing
-            retTyMaybe <- foldM reducer (Just NeverTy) armBodyTys
+            retTyMaybe <- foldM reducer (Just ty) armBodyTys
             let retTyRes = unsafeToNoAlias . (scrutTy -&&>) <$> retTyMaybe `toRes` RootCause msg
-                 where msg = "The arms of a `match` statement must all have the same type"
+                 where msg = "The arms of a `match` expression must all have the same type"
             -- TODO: perform exhaustiveness/usefulness checking here.
             let arms'' = map (\(refutPat, (body, _)) -> (refutPat, body)) arms'
             return $ (Ast.MatchF scrut' arms'' :<:) <$> retTyRes

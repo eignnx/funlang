@@ -27,7 +27,7 @@ def eval[ctx: rec Ctx, expr: rec Expr] -> Tuple[Ctx, Int] do
         let {ctx, expr} = eval[ctx, expr];
         let ctx = { :Bind x, expr, ctx};
         eval[ctx, body]
-  end as Tuple[rec Ctx, Int]
+  end
 end
 
 def ctx_lookup[ctx: Ctx, x: Text] -> Int do
@@ -41,7 +41,7 @@ def ctx_lookup[ctx: Ctx, x: Text] -> Int do
         else 
           ctx_lookup[ctx, x]
         end
-  end as Int
+  end
 end
 
 def main[] do
