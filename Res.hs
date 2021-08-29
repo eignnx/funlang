@@ -9,6 +9,7 @@ where
 
 import Control.Applicative (Applicative(liftA2))
 import Utils (indent, (+++), code)
+import Control.Monad.Trans (MonadTrans(lift))
 
 data Res a
   = Ok a
@@ -42,6 +43,9 @@ instance Monad Res where
   (Ok x) >>= f = f x
   (Err e) >>= f = Err e
 
+instance MonadFail Res where
+  fail msg = Err $ RootCause msg
+
 data Error
   = RootCause String
   | ResultingError String Error
@@ -63,10 +67,9 @@ addError :: Res a -> String -> Res a
 addError (Ok a) _ = Ok a
 addError (Err err) errMsg = Err (ResultingError errMsg err)
 
-ensureM :: Monad m => m Bool -> String -> m (Res a) -> m (Res a)
+ensureM :: (Monad m, MonadFail m) => m Bool -> String -> m a -> m a
 ensureM cond failureMsg program = do
   bool <- cond
-  res <- program
   if bool
-    then return res
-    else return $ Err $ RootCause failureMsg
+    then program
+    else fail failureMsg

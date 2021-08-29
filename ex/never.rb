@@ -1,5 +1,5 @@
 def loop_forever[] -> Never do
-  "pls pop me!";
+  "pls pop me!"; # Error: The expression `"pls pop me!"` has type `$Text`, not `$Void`.
   loop do
     intr.here[];
   end

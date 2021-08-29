@@ -12,26 +12,43 @@ module TyCheck
 where
 
 import qualified Ast
-import           Ast           ( Typed(HasTy) )
-import           Ty            ( Ty(..) )
-import           Tcx           ( TyChecker(..), (<:), (-&&>), (>||<), varLookup, define, setFnRetTy, getFnRetTy, resolveAliasAsVrnts, defineTyAlias, initTcx, NoAliasTy (getNoAlias, DestructureNoAlias), toNoAlias, unsafeToNoAlias, inNewScope, resolveAsVrnts )
-import           Utils         ( (+++), code, codeIdent, indent )
-import           Cata          ( RecTyped(..), At(..) )
-import           Res           ( Res(..), Error (RootCause), addError, toRes, ensureM )
+import Ast ( Typed(HasTy) )
+import Ty ( Ty(..) )
+import Tcx
+    ( mapA,
+      resolveAsVrnts,
+      inNewScope,
+      unsafeToNoAlias,
+      toNoAlias,
+      initTcx,
+      defineTyAlias,
+      resolveAliasAsVrnts,
+      getFnRetTy,
+      setFnRetTy,
+      define,
+      varLookup,
+      (>||<),
+      (-&&>),
+      (<:),
+      NoAliasTy(..),
+      TyChecker,
+      forA )
+import Utils ( codeIdent, code, (+++) )
+import Cata ( At((:@:)), RecTyped(..) )
+import Res ( ensureM, toRes, Error(RootCause), Res )
 import qualified Intr
-import qualified Data.Map      as M
-import           Control.Monad ( foldM )
+import qualified Data.Map as M
+import Control.Monad ( foldM )
 import           Data.Semigroup
-import           Control.Monad.State
+import Control.Monad.State ( evalStateT, foldM, MonadTrans(lift) )
 import           Control.Applicative
-import           Data.Maybe    ( isJust, fromMaybe )
+import Data.Maybe ( fromMaybe )
 import Debug.Trace (trace)
-import GHCi.Message (Msg(Msg))
 
 class CheckType a where
   type Checked a :: *
-  infer :: a -> TyChecker (Res (Checked a))
-  check :: a -> Ty -> TyChecker (Res (Checked a))
+  infer :: a -> TyChecker (Checked a)
+  check :: a -> Ty -> TyChecker (Checked a)
 
 instance CheckType Ast.Pat where
   type Checked Ast.Pat = Ast.Pat
@@ -40,21 +57,17 @@ instance CheckType Ast.Pat where
 
   check (Ast.VarPat name) ty = do
     define name ty
-    return $ Ok $ Ast.VarPat name
+    return $ Ast.VarPat name
 
   check pat@(Ast.TuplePat ps) (TupleTy ts)
     | length ps == length ts = do
       let pairs = zip ps ts
-      psRes <- sequenceA <$> mapM (uncurry check) pairs
-      case psRes of
-        Ok ps'  -> return $ Ok $ Ast.TuplePat ps'
-        Err err -> return $ Err err
-    | otherwise = return $ Err $ RootCause msg
-      where msg = "The pattern" +++ code pat +++ "can't be bound to a tuple that has" +++ show (length ts) +++ "elements"
+      ps <- mapA (uncurry check) pairs
+      return $ Ast.TuplePat ps
+    | otherwise = fail $ "The pattern" +++ code pat +++ "can't be bound to a tuple that has" +++ show (length ts) +++ "elements"
 
   check pat@(Ast.TuplePat ps) nonTupleTy =
-    return $ Err $ RootCause msg
-      where msg = "The tuple pattern" +++ code pat +++ "can't be bound to something of type" +++ code nonTupleTy
+    fail $ "The tuple pattern" +++ code pat +++ "can't be bound to something of type" +++ code nonTupleTy
 
 instance CheckType Ast.RefutPat where
   type Checked Ast.RefutPat = Ast.RefutPat
@@ -63,67 +76,52 @@ instance CheckType Ast.RefutPat where
 
   check (Ast.VarRefutPat name) ty = do
     define name ty
-    return $ Ok $ Ast.VarRefutPat name
+    return $ Ast.VarRefutPat name
 
   check pat@(Ast.VrntRefutPat name params) someVrnt = do
-    vrntsRes <- resolveAsVrnts someVrnt
-    case vrntsRes of
-      Err err -> return $ Err err
-      Ok vrnts ->
-        case M.lookup name vrnts of
-          Nothing -> return $ Err $ RootCause msg
-            where msg = "I don't know what" +++ codeIdent name +++ "refers to in the pattern" +++ code pat
-          Just expectedParamTys -> do
-            paramsRes <- sequenceA <$> forM (zip params expectedParamTys) (\(param, expectedTy) -> do
-              check param expectedTy)
-            return $ Ast.VrntRefutPat name <$> paramsRes
+    vrnts <- resolveAsVrnts someVrnt
+    case M.lookup name vrnts of
+      Nothing -> fail msg
+        where msg = "I don't know what" +++ codeIdent name +++ "refers to in the pattern" +++ code pat
+      Just expectedParamTys -> do
+        params' <- forA (zip params expectedParamTys) $ \(param, expectedTy) -> do
+          check param expectedTy
+        return $ Ast.VrntRefutPat name params'
 
 instance CheckType (Ast.Seq Ast.Expr) where
 
   type Checked (Ast.Seq Ast.Expr) = (Ast.Seq Ast.TypedExpr, NoAliasTy)
 
   infer Ast.Empty = do
-    return $ Ok (Ast.Empty, unsafeToNoAlias VoidTy)
+    return (Ast.Empty, unsafeToNoAlias VoidTy)
 
   infer (Ast.Result e) = do
-    eRes <- infer e
-    case eRes of
-      Ok e'@(_ :<: ty) -> do
-        let result = Ast.Result e'
-        return $ Ok (result, ty)
-      Err err -> return $ Err err
+    e'@(_ :<: ty) <- infer e
+    let result = Ast.Result e'
+    return (result, ty)
 
   infer (Ast.Semi e seq) = do
-    eRes <- infer e
-    seqRes <- infer seq
-    case (eRes, seqRes) of
-      (Ok e'@(_ :<: DestructureNoAlias eTy), Ok (seq', DestructureNoAlias seqTy)) -> do
-        let semi = Ast.Semi e' seq'
-        let ty = unsafeToNoAlias $ eTy -&&> seqTy
-        return $ Ok (semi, ty)
-      _ -> return (eRes *> seqRes)
+    e'@(_ :<: DestructureNoAlias eTy) <- infer e
+    (seq', DestructureNoAlias seqTy) <- infer seq
+    let semi = Ast.Semi e' seq'
+    let ty = unsafeToNoAlias $ eTy -&&> seqTy
+    return (semi, ty)
 
   check Ast.Empty ty = ensureM (ty <: VoidTy) msg $ do
-    return $ Ok (Ast.Empty, unsafeToNoAlias VoidTy)
+    return (Ast.Empty, unsafeToNoAlias VoidTy)
     where msg = "An empty sequence has type" +++ code VoidTy +++ "not" +++ code ty
 
   check (Ast.Result e) ty = do
-    eRes <- check e ty
-    case eRes of
-      Ok e'@(_ :<: ty) -> do
-        let result = Ast.Result e'
-        return $ Ok (result, ty)
-      Err err -> return $ Err err
+    e'@(_ :<: ty) <- check e ty
+    let result = Ast.Result e'
+    return (result, ty)
 
   check (Ast.Semi e seq) ty = do
-    eRes <- check e VoidTy
-    seqRes <- check seq ty
-    case (eRes, seqRes) of
-      (Ok e'@(_ :<: DestructureNoAlias eTy), Ok (seq', DestructureNoAlias seqTy)) -> do
-        let semi = Ast.Semi e' seq'
-        let ty = unsafeToNoAlias $ eTy -&&> seqTy
-        return $ Ok (semi, ty)
-      _ -> return (eRes *> seqRes)
+    e'@(_ :<: DestructureNoAlias eTy) <- check e VoidTy
+    (seq', DestructureNoAlias seqTy) <- check seq ty
+    let semi = Ast.Semi e' seq'
+    let ty = unsafeToNoAlias $ eTy -&&> seqTy
+    return (semi, ty)
 
 -- | Takes a Foldable sequence of typed exprs and merges their types via `-&&>`.
 --   Example:
@@ -134,11 +132,11 @@ operationalArgsType :: Foldable t => t (RecTyped f) -> Ty
 operationalArgsType = foldr ((-&&>) . getTy) VoidTy
   where getTy (_ :<: ty) = getNoAlias ty
 
-checkArgs :: Ast.Expr -> [Ast.Expr] -> [Ty] -> TyChecker (Res [Ast.TypedExpr])
+checkArgs :: Ast.Expr -> [Ast.Expr] -> [Ty] -> TyChecker [Ast.TypedExpr]
 checkArgs fn args argTys
   | length args == length argTys =
-    sequenceA <$> zipWithM check args argTys -- Check that the args have right types.
-  | otherwise = return $ Err $ RootCause msg
+    mapA (uncurry check) (zip args argTys) -- Check that the args have right types.
+  | otherwise = fail msg
     where msg = "Oops! You passed" +++ show received +++ "arguments to"
               +++ code fn ++ ", but it expects" +++ show expected
           expected = length argTys
@@ -151,14 +149,11 @@ inferUnaryOp :: Ast.UnaryOp
              -> Ty -- Expected argument type
              -> Ty -- Result type
              -> Ast.Expr
-             -> TyChecker (Res Ast.TypedExpr)
+             -> TyChecker Ast.TypedExpr
 inferUnaryOp op argTy retTy expr = do
-  exprRes <- check expr argTy
-  case exprRes of
-    Ok expr'@(_ :<: exprTy) -> do
-      let ty = unsafeToNoAlias $ getNoAlias exprTy -&&> retTy
-      return $ Ok (Ast.UnaryF op expr' :<: ty)
-    Err err -> return $ Err err
+  expr'@(_ :<: exprTy) <- check expr argTy
+  let ty = unsafeToNoAlias $ getNoAlias exprTy -&&> retTy
+  return (Ast.UnaryF op expr' :<: ty)
 
 -- Helper function for inferring+checking binary operators.
 -- Pass in the expected type of the arguments, the expected return type, and it will do
@@ -168,15 +163,12 @@ inferBinOp :: Ast.BinOp
            -> Ty -- Result type
            -> Ast.Expr
            -> Ast.Expr
-           -> TyChecker (Res Ast.TypedExpr)
+           -> TyChecker Ast.TypedExpr
 inferBinOp op argTy retTy e1 e2 = do
-    e1Ty <- check e1 argTy
-    e2Ty <- check e2 argTy
-    case (e1Ty, e2Ty) of
-      (Ok e1'@(_  :<: ty1), Ok e2'@(_ :<: ty2)) -> do
-        let ty = unsafeToNoAlias $ getNoAlias ty1 -&&> getNoAlias ty2 -&&> retTy
-        return $ Ok (Ast.BinaryF op e1' e2' :<: ty)
-      (a, b) -> return (a *> b)
+    e1'@(_  :<: ty1) <- check e1 argTy
+    e2'@(_ :<: ty2) <- check e2 argTy
+    let ty = unsafeToNoAlias $ getNoAlias ty1 -&&> getNoAlias ty2 -&&> retTy
+    return (Ast.BinaryF op e1' e2' :<: ty)
 
 itemName :: Show (Ast.ExprF r) => Ast.ExprF r -> Res String
 itemName expr = Ast.itemName expr `toRes` RootCause msg
@@ -187,58 +179,46 @@ instance CheckType Ast.Expr where
   type Checked Ast.Expr = Ast.TypedExpr
 
   infer (Ast.VarF name :@: loc) = do
-    tyRes <- varLookup name
-    case tyRes of
-      Ok ty -> do
-        tyNoAliasRes <- toNoAlias ty
-        let var = Ast.VarF name
-        return $ (var :<:) <$> tyNoAliasRes
-      Err err -> return $ Err err
+    ty <- varLookup name
+    tyNoAliasRes <- toNoAlias ty
+    let var = Ast.VarF name
+    return $ var :<: tyNoAliasRes
 
   infer (Ast.LiteralF x :@: loc) =
     case x of
 
-      Ast.Unit   -> return $ Ok $ Ast.LiteralF Ast.Unit :<: unsafeToNoAlias VoidTy
+      Ast.Unit   -> return $ Ast.LiteralF Ast.Unit :<: unsafeToNoAlias VoidTy
 
-      Ast.Bool b -> return $ Ok $ Ast.LiteralF (Ast.Bool b) :<: unsafeToNoAlias BoolTy
+      Ast.Bool b -> return $ Ast.LiteralF (Ast.Bool b) :<: unsafeToNoAlias BoolTy
 
-      Ast.Int i  -> return $ Ok $ Ast.LiteralF (Ast.Int i) :<: unsafeToNoAlias IntTy
+      Ast.Int i  -> return $ Ast.LiteralF (Ast.Int i) :<: unsafeToNoAlias IntTy
 
-      Ast.Text t -> return $ Ok $ Ast.LiteralF (Ast.Text t) :<: unsafeToNoAlias TextTy
+      Ast.Text t -> return $ Ast.LiteralF (Ast.Text t) :<: unsafeToNoAlias TextTy
 
       Ast.Tuple exprs -> do
-        exprsRes <- sequenceA <$> mapM infer exprs
-        case exprsRes of
-          Ok exprs' -> do
-            let exprTys = map (\(_ :<: ty) -> getNoAlias ty) exprs'
-            let ty = unsafeToNoAlias $ TupleTy exprTys
-            return $ Ok $ Ast.LiteralF (Ast.Tuple exprs') :<: ty
-          Err err -> return $ Err err
+        exprs' <- mapA infer exprs
+        let exprTys = map (\(_ :<: ty) -> getNoAlias ty) exprs'
+        let ty = unsafeToNoAlias $ TupleTy exprTys
+        return $ Ast.LiteralF (Ast.Tuple exprs') :<: ty
 
       -- To infer the type of a variant literal, just pacakge its name and the
       -- types of its arguments inside `VrntTy`.
       Ast.Vrnt name args -> do
-        argsRes <- sequenceA <$> mapM infer args
-        case argsRes of
-          Ok args' -> do
-            let argTys = map (\(_ :<: ty) -> getNoAlias ty) args'
-            let ty = unsafeToNoAlias $ VrntTy $ M.singleton name argTys
-            let lit = Ast.LiteralF (Ast.Vrnt name args')
-            return $ Ok $ lit :<: ty
-          Err err -> return $ Err err
+        args' <- mapA infer args
+        let argTys = map (\(_ :<: ty) -> getNoAlias ty) args'
+        let ty = unsafeToNoAlias $ VrntTy $ M.singleton name argTys
+        let lit = Ast.LiteralF (Ast.Vrnt name args')
+        return $ lit :<: ty
 
   infer (Ast.UnaryF op@Ast.Not expr :@: loc) = inferUnaryOp op BoolTy BoolTy expr
   infer (Ast.UnaryF op@Ast.Neg expr :@: loc) = inferUnaryOp op IntTy IntTy expr
   infer e@(Ast.UnaryF (Ast.TupleProj idx) expr :@: loc) = do
-    exprRes <- infer expr
-    case exprRes of
-      Ok expr'@(_ :<: DestructureNoAlias (TupleTy tys))
-        | fromIntegral idx < length tys -> do
-          let ty = unsafeToNoAlias $ tys !! fromIntegral idx
-          return $ Ok $ Ast.UnaryF (Ast.TupleProj idx) expr' :<: ty
-        | otherwise -> return $ Err $ RootCause msg
-          where msg = "The tuple expression" +++ code expr +++ "has only" +++ show (length tys) +++ "components, so you can't project the component at index" +++ show idx
-      err -> return err
+    expr'@(_ :<: DestructureNoAlias (TupleTy tys)) <- infer expr
+    if fromIntegral idx < length tys
+      then do
+        let ty = unsafeToNoAlias $ tys !! fromIntegral idx
+        return $ Ast.UnaryF (Ast.TupleProj idx) expr' :<: ty
+      else fail $ "The tuple expression" +++ code expr +++ "has only" +++ show (length tys) +++ "components, so you can't project the component at index" +++ show idx
 
   infer (Ast.BinaryF op@(Ast.ArithOp _) e1 e2 :@: loc)          = inferBinOp op IntTy IntTy e1 e2
   infer (Ast.BinaryF op@(Ast.BoolOp  _) e1 e2 :@: loc)          = inferBinOp op BoolTy BoolTy e1 e2
@@ -247,10 +227,8 @@ instance CheckType Ast.Expr where
 
   -- This `infer` impl simply defers to `instance CheckType (Ast.Seq Ast.Expr)`.
   infer (Ast.BlockF seq :@: loc) = do
-    seqRes <- infer seq
-    case seqRes of
-      Ok (seq', ty) -> return $ Ok $ Ast.BlockF seq' :<: ty
-      Err err -> return $ Err err
+    (seq', ty) <- infer seq
+    return $ Ast.BlockF seq' :<: ty
 
   -- The runtime imposes the following order on the execution of a `Call`
   -- expression:
@@ -264,88 +242,69 @@ instance CheckType Ast.Expr where
   -- HOWEVER: While type-checking, we must FIRST infer the type of `f`, THEN
   -- check that the inferred types of the arguments match `f`'s parameter types.
   infer (Ast.CallF fn args :@: loc) = do
-    fnRes <- infer fn
-    case fnRes of
-      Ok fn'@(_ :<: DestructureNoAlias (FnTy paramTys retTy)) -> do
-        argsRes <- checkArgs fn args paramTys
-        case argsRes of
-          Ok args' -> do
-            let call = Ast.CallF fn' args'
-            let ty = operationalArgsType args' -&&> retTy
-            tyNoAliasRes <- toNoAlias ty
-            return $ (call :<:) <$> tyNoAliasRes
-          Err err -> return $ Err err
-      Ok fn'@(_ :<: DestructureNoAlias NeverTy) -> do
+    fn'@(_ :<: DestructureNoAlias fnTy) <- infer fn
+    case fnTy of
+      FnTy paramTys retTy -> do
+        args' <- checkArgs fn args paramTys
+        let call = Ast.CallF fn' args'
+        let ty = operationalArgsType args' -&&> retTy
+        tyNoAliasRes <- toNoAlias ty
+        return $ call :<: tyNoAliasRes
+      NeverTy -> do
         -- Oops! Well, let's make the best of it. Try inferring args.
-        argsRes <- sequenceA <$> mapM infer args
-        let rebuild args' = Ast.CallF fn' args' :<: unsafeToNoAlias NeverTy
-        return $ rebuild <$> argsRes
-      Ok (_ :<: nonFnTy) -> return $ Err $ RootCause msg
-        where msg = code fn +++ "is a" +++ code nonFnTy ++ ", not a function"
-      err -> return err
+        args' <- mapA infer args
+        return $ Ast.CallF fn' args' :<: unsafeToNoAlias NeverTy
+      nonFnTy -> fail $ code fn +++ "is a" +++ code nonFnTy ++ ", not a function"
 
   infer expr@(Ast.IntrinsicF place name args :@: loc) = do
     let intr = Intr.fromName name place
     let (expectedArgs, expectedRet) = Intr.sig intr
-    argsRes <- checkArgs expr args expectedArgs
-    case argsRes of
-      Ok args' -> do
-        let ty = operationalArgsType args' -&&> expectedRet
-        tyNoAliasRes <- toNoAlias ty
-        let intr = Ast.IntrinsicF place name args'
-        return $ (intr :<:) <$> tyNoAliasRes
-      Err err -> return $ Err err
+    args' <- checkArgs expr args expectedArgs
+    let ty = operationalArgsType args' -&&> expectedRet
+    tyNoAlias <- toNoAlias ty
+    let intr = Ast.IntrinsicF place name args'
+    return $ intr :<: tyNoAlias
 
   infer (Ast.LetF pat expr :@: loc) = do
-    exprRes <- infer expr
-    case exprRes of
-      Ok expr'@(_ :<: DestructureNoAlias exprTy) -> do
-        patRes <- check pat exprTy
-        case patRes of
-          Ok _ -> do
-            let ty = unsafeToNoAlias $ exprTy -&&> VoidTy
-            let letExpr = Ast.LetF pat expr'
-            return $ Ok (letExpr :<: ty)
-          Err err -> return $ Err err
-      err -> return $ err `addError` msg
-        where msg = "The declaration of" +++ code pat +++ "doesn't type check"
+    expr'@(_ :<: DestructureNoAlias exprTy) <- infer expr
+    pat <- check pat exprTy
+    let ty = unsafeToNoAlias $ exprTy -&&> VoidTy
+    let letExpr = Ast.LetF pat expr'
+    return (letExpr :<: ty)
+      -- TODO:
+      -- err -> return $ err `addError` msg
+      --   where msg = "The declaration of" +++ code pat +++ "doesn't type check"
 
   infer (Ast.AssignF name expr :@: loc) = do
-    varRes <- varLookup name
-    case varRes of
-      Ok varTy -> do
-        exprRes <- check expr varTy
-        case exprRes of
-          Ok expr'@(_ :<: DestructureNoAlias exprTy) -> do
-            let ty = unsafeToNoAlias $ exprTy -&&> VoidTy
-            let assign = Ast.AssignF name expr'
-            return $ Ok (assign :<: ty)
-          err -> return $ err `addError` msg
-            where msg = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
-      Err err -> return $ Err err `addError` msg
-        where msg = "I can't assign to the undeclared variable" +++ codeIdent name
+    varTy <- varLookup name
+    expr'@(_ :<: DestructureNoAlias exprTy) <- check expr varTy
+    let ty = unsafeToNoAlias $ exprTy -&&> VoidTy
+    let assign = Ast.AssignF name expr'
+    return $ assign :<: ty
+      -- TODO:
+      -- err -> return $ err `addError` msg
+      --   where msg = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
+      -- TODO:
+      -- Err err -> return $ Err err `addError` msg
+      --   where msg = "I can't assign to the undeclared variable" +++ codeIdent name
 
   infer (Ast.LetConstF name expr :@: loc) = do
-    exprRes <- infer expr
-    case exprRes of
-      Ok expr'@(_ :<: DestructureNoAlias exprTy) -> do
-        define name exprTy
-        let ty = unsafeToNoAlias $ exprTy -&&> VoidTy
-        let letConst = Ast.LetConstF name expr'
-        return $ Ok (letConst :<: ty)
-      err -> return $ err `addError` msg
-        where msg = "The declaration of" +++ codeIdent name +++ "doesn't type check"
+    expr'@(_ :<: DestructureNoAlias exprTy) <- infer expr
+    define name exprTy
+    let ty = unsafeToNoAlias $ exprTy -&&> VoidTy
+    let letConst = Ast.LetConstF name expr'
+    return $ letConst :<: ty
+      -- TODO:
+      -- err -> return $ err `addError` msg
+      --   where msg = "The declaration of" +++ codeIdent name +++ "doesn't type check"
 
   infer (Ast.RetF expr :@: loc) = do
     fnRetTy <- getFnRetTy
-    exprRes <- check expr fnRetTy
-    case exprRes of
-      Ok expr'@(_ :<: DestructureNoAlias exprTy) -> do
-        let ret = Ast.RetF expr'
-        -- The `-&&>` shouldn't be necessary here, but whatever.
-        let ty = unsafeToNoAlias $ exprTy -&&> NeverTy
-        return $ Ok (ret :<: ty)
-      err -> return err
+    expr'@(_ :<: DestructureNoAlias exprTy) <- check expr fnRetTy
+    let ret = Ast.RetF expr'
+    -- The `-&&>` shouldn't be necessary here, but whatever.
+    let ty = unsafeToNoAlias $ exprTy -&&> NeverTy
+    return $ ret :<: ty
 
 --   -- infer ctx (FnExpr (AnnParam param paramTy) body) =
 --   --   let ctx' = (param, paramTy) : ctx
@@ -377,197 +336,169 @@ instance CheckType Ast.Expr where
   -- usually, it does not infinitely loop. It usually loops until the
   -- condition is no longer true, then ends, yielding void.
   infer (Ast.WhileF cond body :@: loc) = do
-    condRes <- check cond BoolTy
-    bodyRes <- check body VoidTy -- Body ought to have type Void.
-    case (condRes, bodyRes) of
-        (Ok cond'@(_ :<: DestructureNoAlias condTy), Ok body'@(_ :<: DestructureNoAlias bodyTy)) -> do
-          let while = Ast.WhileF cond' body'
-          let ty = unsafeToNoAlias $ condTy -&&> bodyTy
-          return $ Ok $ while :<: ty
-        (res1, res2) -> return $ (res1 `addError` msg1) *> (res2 `addError` msg2)
-          where msg1 = "The condition of this `while` loop doesn't have type" +++ code BoolTy
-                msg2 = "The body of a this `while` loop doesn't have type" +++ code VoidTy
+    cond'@(_ :<: DestructureNoAlias condTy) <- check cond BoolTy
+    body'@(_ :<: DestructureNoAlias bodyTy) <- check body VoidTy -- Body ought to have type Void.
+    let while = Ast.WhileF cond' body'
+    let ty = unsafeToNoAlias $ condTy -&&> bodyTy
+    return $ while :<: ty
+    -- TODO:
+    -- (res1, res2) -> return $ (res1 `addError` msg1) *> (res2 `addError` msg2)
+    --   where msg1 = "The condition of this `while` loop doesn't have type" +++ code BoolTy
+    --         msg2 = "The body of a this `while` loop doesn't have type" +++ code VoidTy
 
   infer (Ast.LoopF body :@: loc) = do
-    bodyRes <- check body VoidTy -- Body ought to have type Void.y
-    case bodyRes of
-        Ok body' -> do
-          let loop = Ast.LoopF body'
-          return $ Ok (loop :<: unsafeToNoAlias NeverTy)
-        err -> return $ err `addError` msg
-          where msg = "I couldn't infer the type of the `loop` expression"
+    body' <- check body VoidTy -- Body ought to have type Void.y
+    let loop = Ast.LoopF body'
+    return $ loop :<: unsafeToNoAlias NeverTy
+    -- TODO:
+    -- err -> return $ err `addError` msg
+    --   where msg = "I couldn't infer the type of the `loop` expression"
 
-  infer (Ast.NopF :@: loc) = return $ Ok (Ast.NopF :<: unsafeToNoAlias VoidTy)
+  infer (Ast.NopF :@: loc) = return $ Ast.NopF :<: unsafeToNoAlias VoidTy
 
   infer (Ast.AnnF expr ty :@: loc) = do
-    exprRes <- check expr ty
-    tyNoAliasRes <- toNoAlias ty
-    let rebuild expr' ty' = Ast.AnnF expr' ty :<: ty'
-    return $ (rebuild <$> exprRes <*> tyNoAliasRes) `addError` msg
-      where msg = "The expression" +++ code expr +++ "does not have type" +++ code ty
+    expr' <- check expr ty
+    tyNoAlias <- toNoAlias ty
+    return $ Ast.AnnF expr' ty :<: tyNoAlias
+    -- TODO:
+    -- where msg = "The expression" +++ code expr +++ "does not have type" +++ code ty
 
   -- For when the return type IS specified.
   infer (Ast.DefF name params (Just retTy) body :@: loc) = do
     setFnRetTy retTy -- Set fn's return type.
-    (paramTys, bodyRes) <- inNewScope $ do
-      paramTys <- forM params $ uncurry define
-      bodyRes <- check body retTy
-      return (paramTys, bodyRes)
-    case bodyRes of
-      Ok typedBody@(_ :<: DestructureNoAlias bodyTy) -> do
-        define name $ FnTy paramTys bodyTy -- We MUST save the full type now.
-        let def = Ast.DefF name params (Just retTy) typedBody
-        return $ Ok (def :<: unsafeToNoAlias VoidTy)
-      Err err -> return $ Err err `addError` msg
-        where msg = "The body of function" +++ codeIdent name +++ "doesn't type check"
+    (paramTys, body'@(_ :<: DestructureNoAlias bodyTy)) <- inNewScope $ do
+      paramTys <- mapA (uncurry define) params -- Note: `mapA` not necc'ry here, could use `mapM`.
+      body' <- check body retTy
+      return (paramTys, body')
+    define name $ FnTy paramTys bodyTy -- We MUST save the full type now.
+    let def = Ast.DefF name params (Just retTy) body'
+    return $ def :<: unsafeToNoAlias VoidTy
+    -- TODO:
+    -- Err err -> return $ Err err `addError` msg
+    --   where msg = "The body of function" +++ codeIdent name +++ "doesn't type check"
 
   -- For when the return type is NOT specified.
   infer (Ast.DefF name params Nothing body :@: loc) = do
     setFnRetTy NeverTy -- We don't know the fn's return type yet! FIXME: seems bad...
-    (paramTys, bodyRes) <- inNewScope $ do
-      paramTys <- forM params $ uncurry define
+    (paramTys, typedBody@(_ :<: DestructureNoAlias bodyTy)) <- inNewScope $ do
+      paramTys <- mapA (uncurry define) params -- Note: `mapA` not necc'ry here, could use `mapM`.
       bodyRes <- infer body
       return (paramTys, bodyRes)
-    case bodyRes of
-      Ok typedBody@(_ :<: DestructureNoAlias bodyTy) -> do
-        define name $ FnTy paramTys bodyTy -- We MUST save the full type now.
-        let def = Ast.DefF name params (Just bodyTy) typedBody
-        return $ Ok (def :<: unsafeToNoAlias VoidTy)
-      Err err -> return $ Err err `addError` msg
-        where msg = "The body of function" +++ codeIdent name +++ "doesn't type check"
+    define name $ FnTy paramTys bodyTy -- We MUST save the full type now.
+    let def = Ast.DefF name params (Just bodyTy) typedBody
+    return $ def :<: unsafeToNoAlias VoidTy
+      -- TODO:
+      -- Err err -> return $ Err err `addError` msg
+      --   where msg = "The body of function" +++ codeIdent name +++ "doesn't type check"
 
   infer (Ast.ModF name items :@: loc) = do
-    res <- skimItemDefs -- First, we need to put all top-level definitions into the Ctx.
-    case res of
-      Err err -> return $ Err err `addError` msg
-        where msg = "I got stuck while skimming the contents of module" +++ codeIdent name
-      Ok () -> do
-        itemsRes <- mapM infer items
-        case sequenceA itemsRes of
-          Ok items' -> do
-            let mkPair item@(itemF :<: _) = (Data.Maybe.fromMaybe (error "bad item name!") $ Ast.itemName itemF, Ast.modLevelItemTy item)
-            let modTy = ModTy $ M.fromList $ map mkPair items'
-            modTyNoAliasRes <- toNoAlias modTy
-            let mod = Ast.ModF name items'
-            define name modTy
-            return $ (mod :<:) <$> modTyNoAliasRes
-          Err err -> return $ Err err
+    skimItemDefs -- First, we need to put all top-level definitions into the Ctx.
+      -- TODO:
+      -- Err err -> return $ Err err `addError` msg
+      --   where msg = "I got stuck while skimming the contents of module" +++ codeIdent name
+    items' <- mapA infer items
+    let mkPair item@(itemF :<: _) =
+          ( Data.Maybe.fromMaybe (error "bad item name!") $ Ast.itemName itemF
+          , Ast.modLevelItemTy item
+          )
+    let modTy = ModTy $ M.fromList $ map mkPair items'
+    modTyNoAlias <- toNoAlias modTy
+    let mod = Ast.ModF name items'
+    define name modTy
+    return $ mod :<: modTyNoAlias
     where
-      skimItemDefs :: TyChecker (Res ())
+      skimItemDefs :: TyChecker ()
       skimItemDefs =
-        mconcat <$> forM items (\case
+        mconcat <$> forA items (\case
           Ast.DefF name params (Just retTy) _ :@: loc -> do
             define name $ FnTy (map snd params) retTy
-            return $ Ok ()
+            return ()
           Ast.DefF name params Nothing _ :@: loc -> do
             -- Since we don't know the return type, we have to stub for now.
             define name $ FnTy (map snd params) NeverTy -- FIXME: see ./ex/rec-problem.rb
-            return $ Ok ()
+            return ()
           Ast.ModF name _ :@: loc -> do
             define name $ ModTy M.empty
-            return $ Ok ()
+            return ()
           Ast.LetConstF name _ :@: loc -> do
             define name NeverTy
-            return $ Ok ()
+            return ()
           Ast.TyDefF Ast.NotRec tyName defs :@: loc -> do
             let
-              f (Ast.VrntDef name tys) = return $ Ok $ M.singleton name (map g tys)
+              f (Ast.VrntDef name tys) = return $ M.singleton name (map g tys)
                 where g = \case
                         Ast.NonRecTy ty -> ty
                         _ -> error "Can't use type `rec` in a non `rec` type!"
               f (Ast.SubTyDef name) = resolveAliasAsVrnts name
-            cmpntsUnjoined <- sequenceA <$> mapM f defs
-            case mconcat <$> cmpntsUnjoined of
-              Ok cmpnts -> do
-                let vrntTy = VrntTy cmpnts
-                defineTyAlias tyName vrntTy
-                return $ Ok ()
-              Err err -> return $ Err err
+            cmpnts <- mconcat <$> mapA f defs
+            let vrntTy = VrntTy cmpnts
+            defineTyAlias tyName vrntTy
+            return ()
           Ast.TyDefF Ast.IsRec tyName defs :@: loc -> do
             let recTyName = "?" ++ tyName
             let
-              f (Ast.VrntDef name tys) = return $ Ok $ M.singleton name (map g tys)
+              f (Ast.VrntDef name tys) = return $ M.singleton name (map g tys)
                 where g = \case
                         Ast.NonRecTy ty -> ty
                         Ast.Rec -> TyVar recTyName
               f (Ast.SubTyDef name) = resolveAliasAsVrnts name
-            cmpntsUnjoined <- sequenceA <$> mapM f defs
-            case mconcat <$> cmpntsUnjoined of
-              Ok cmpnts -> do
-                let vrntTy = VrntTy cmpnts
-                let recTy = RecTy recTyName vrntTy
-                defineTyAlias tyName recTy
-                return $ Ok ()
-              Err err -> return $ Err err
-          other -> return $ Err $ RootCause msg
+            cmpnts <- mconcat <$> mapA f defs
+            let vrntTy = VrntTy cmpnts
+            let recTy = RecTy recTyName vrntTy
+            defineTyAlias tyName recTy
+            return ()
+          other -> fail msg
             where msg = "I can't let you put the expression" +++ code other +++ "at the top-level of a module.")
 
   infer (Ast.TyDefF isRec name defs :@: loc) = do
-    return $ Ok $ Ast.TyDefF isRec name defs :<: unsafeToNoAlias VoidTy
+    return $ Ast.TyDefF isRec name defs :<: unsafeToNoAlias VoidTy
 
   -- Default case.
-  infer expr = return $ Err $ RootCause $ msg
-    where msg = "I don't have enough information to infer the type of" +++ code expr
+  infer expr = fail $ "I don't have enough information to infer the type of" +++ code expr
 
-  check :: Ast.Expr -> Ty -> TyChecker (Res Ast.TypedExpr)
-
+  check :: Ast.Expr -> Ty -> TyChecker Ast.TypedExpr
 
   check (Ast.BlockF seq :@: loc) ty = do
-    seqRes <- check seq ty
-    case seqRes of
-      Ok (seq', ty) -> return $ Ok $ Ast.BlockF seq' :<: ty
-      Err err -> return $ Err err
+    (seq', ty) <- check seq ty
+    return $ Ast.BlockF seq' :<: ty
 
   -- An `if` expression has two sequentially-executed sub-expressions:
   --  1. The conditional expression, and
   --  2. (One of) the branches.
   -- Therefore, the type of an `if` expression ought to be `condTy -&&> branchTy`.
   check (Ast.IfF cond yes no :@: loc) ty = do
-    condRes <- check cond BoolTy
-    case condRes of
-      Err condErr -> return $ Err condErr `addError` msg
-        where msg = "The condition of an `if` must have type" +++ code BoolTy ++ ", but this one doesn't"
-      Ok cond'@(_ :<: DestructureNoAlias condTy) -> do
-        yesRes <- check yes (condTy -&&> ty)
-        noRes <- check no (condTy -&&> ty)
-        case (yesRes, noRes) of
-          (Ok _, Err err) -> return $ Err err
-          (Err err, Ok _) -> return $ Err err
-          (Err yesErr, Err noErr) -> return (Err yesErr *> Err noErr)
-          (Ok (yes', DestructureNoAlias yesTy), Ok (no', DestructureNoAlias noTy)) -> do
-            let ifExpr = Ast.IfF cond' yes' no'
-            meet <- yesTy >||< noTy
-            let maybeNeverMeet = ((condTy -&&>) <$> meet) `toRes` RootCause "Can't join"
-            case maybeNeverMeet of
-              Err err -> return $ Err err
-              Ok meetTy -> do
-                tyRes <- toNoAlias meetTy
-                return $ (ifExpr :<:) <$> tyRes
+    cond'@(_ :<: DestructureNoAlias condTy) <- check cond BoolTy
+    -- TODO:
+    -- Err condErr -> lift $ Err condErr `addError` msg
+    --   where msg = "The condition of an `if` must have type" +++ code BoolTy ++ ", but this one doesn't"
+    -- TODO: both of these branches should be shown in errors.
+    (yes', DestructureNoAlias yesTy) <- check yes (condTy -&&> ty)
+    (no', DestructureNoAlias noTy) <- check no (condTy -&&> ty)
+    let ifExpr = Ast.IfF cond' yes' no'
+    meet <- yesTy >||< noTy
+    meetTy <- lift $ ((condTy -&&>) <$> meet) `toRes` RootCause "Can't join"
+    meetTy' <- toNoAlias meetTy
+    return $ ifExpr :<: meetTy'
 
   check (Ast.MatchF scrut arms :@: loc) ty = do
-    scrutRes <- infer scrut
-    case scrutRes of
-      Ok scrut'@(_ :<: DestructureNoAlias scrutTy) -> do
-        armsRes <- sequenceA <$> forM arms (\(refutPat, body) -> inNewScope $ do
-          -- Check that all patterns have same type as scrutinee.
-          patRes <- check refutPat scrutTy
-          -- And infer the types of all the arm bodies.
-          bodyRes <- check body ty
-          return $ (,) <$> patRes <*> bodyRes)
-        case armsRes of
-          Ok arms' -> do
-            let armBodyTys = map (\(_, (_, DestructureNoAlias ty)) -> ty) arms'
-            let
-              reducer :: Maybe Ty -> Ty -> TyChecker (Maybe Ty)
-              reducer (Just b) a = b >||< a
-              reducer Nothing _ = return Nothing
-            retTyMaybe <- foldM reducer (Just ty) armBodyTys
-            let retTyRes = unsafeToNoAlias . (scrutTy -&&>) <$> retTyMaybe `toRes` RootCause msg
-                 where msg = "The arms of a `match` expression must all have the same type"
-            -- TODO: perform exhaustiveness/usefulness checking here.
-            let arms'' = map (\(refutPat, (body, _)) -> (refutPat, body)) arms'
-            return $ (Ast.MatchF scrut' arms'' :<:) <$> retTyRes
-          Err err -> return $ Err err
+    scrut'@(_ :<: DestructureNoAlias scrutTy) <- infer scrut
+    arms' <- forA arms $ \(refutPat, body) -> inNewScope $ do
+      -- Check that all patterns have same type as scrutinee.
+      refutPat' <- check refutPat scrutTy
+      -- And infer the types of all the arm bodies.
+      body' <- check body ty
+      return (refutPat', body')
+    let armBodyTys = map (\(_, (_, DestructureNoAlias ty)) -> ty) arms'
+    let
+      reducer :: Maybe Ty -> Ty -> TyChecker (Maybe Ty)
+      reducer (Just b) a = b >||< a
+      reducer Nothing _ = return Nothing
+    retTyMaybe <- foldM reducer (Just ty) armBodyTys
+    let retTyRes = unsafeToNoAlias . (scrutTy -&&>) <$> (retTyMaybe `toRes` RootCause msg)
+          where msg = "The arms of a `match` expression must all have the same type"
+    -- TODO: perform exhaustiveness/usefulness checking here.
+    let arms'' = map (\(refutPat, (body, _)) -> (refutPat, body)) arms'
+    lift $ (Ast.MatchF scrut' arms'' :<:) <$> retTyRes
 
 --   -- check ctx fn@(FnExpr param body) (FnTy paramTy retTy) =
 --   --   let pName = paramName param
@@ -582,108 +513,92 @@ instance CheckType Ast.Expr where
 --   --   -- check ctx (App (FnExpr var body) binding) ty
 
   check (Ast.LetF pat expr :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    res <- infer expr
-    case res of
-      Ok expr'@(_ :<: DestructureNoAlias exprTy) -> do
-        patRes <- check pat exprTy
-        case patRes of
-          Ok _ -> do
-            let letExpr = Ast.LetF pat expr'
-            return $ Ok $ letExpr :<: unsafeToNoAlias (exprTy -&&> VoidTy)
-          Err err -> return $ Err err
-      err -> return $ err `addError` msg
-        where msg = "The declaration of" +++ code pat +++ "needs a type annotation"
+    expr'@(_ :<: DestructureNoAlias exprTy) <- infer expr
+    pat' <- check pat exprTy
+    let letExpr = Ast.LetF pat' expr'
+    return $ letExpr :<: unsafeToNoAlias (exprTy -&&> VoidTy)
+      -- TODO:
+      -- err -> return $ err `addError` msg
+      --   where msg = "The declaration of" +++ code pat +++ "needs a type annotation"
     where notVoidMsg = "A let declaration has type" +++ code VoidTy
 
   check (Ast.AssignF name expr :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    isVoid <- ty <: VoidTy
-    nameRes <- varLookup name
-    case nameRes of
-      Ok varTy -> do
-        res <- check expr varTy
-        case res of
-          Ok expr'@(_ :<: DestructureNoAlias exprTy) -> do
-            let assign = Ast.AssignF name expr'
-            return $ Ok $ assign :<: unsafeToNoAlias (exprTy -&&> VoidTy)
-          err -> return $ err `addError` msg
-            where msg = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
-      Err err -> return (Err err `addError` msg)
-        where msg = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
+    varTy <- varLookup name
+    expr'@(_ :<: DestructureNoAlias exprTy) <- check expr varTy
+    let assign = Ast.AssignF name expr'
+    return $ assign :<: unsafeToNoAlias (exprTy -&&> VoidTy)
+      -- TODO:
+      -- err -> lift $ err `addError` msg
+      --   where msg = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
+    -- TODO:
+    -- Err err -> lift (Err err `addError` msg)
+    --   where msg = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
     where notVoidMsg = "Assignments have type" +++ code VoidTy
 
   check (Ast.LetConstF name expr :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    res <- infer expr
-    case res of
-      Ok expr'@(_ :<: DestructureNoAlias exprTy) -> do
-        define name exprTy
-        let letConst = Ast.LetConstF name expr'
-        return $ Ok (letConst :<: unsafeToNoAlias (exprTy -&&> VoidTy))
-      err -> return $ err `addError` msg
-        where msg = "The declaration of" +++ codeIdent name +++ "needs a type annotation"
+    expr'@(_ :<: DestructureNoAlias exprTy) <- infer expr
+    define name exprTy
+    let letConst = Ast.LetConstF name expr'
+    return $ letConst :<: unsafeToNoAlias (exprTy -&&> VoidTy)
+      -- TODO:
+      -- err -> return $ err `addError` msg
+      --   where msg = "The declaration of" +++ codeIdent name +++ "needs a type annotation"
     where notVoidMsg = "A `let const` declaration has type" +++ code VoidTy
 
   -- For when the return type IS specified.
   check (Ast.DefF name params (Just retTy) body :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    (paramTys, bodyRes) <- inNewScope $ do
-      paramTys <- forM params $ uncurry define
-      bodyRes <- check body retTy
-      return (paramTys, bodyRes)
-    case bodyRes of
-      Ok body'@(_ :<: DestructureNoAlias bodyTy) | retTy == bodyTy -> do
+    (paramTys, body'@(_ :<: DestructureNoAlias bodyTy)) <- inNewScope $ do
+      paramTys <- forA params $ uncurry define
+      body' <- check body retTy
+      return (paramTys, body')
+    if retTy == bodyTy
+      then do
         let def = Ast.DefF name params (Just retTy) body'
         define name $ FnTy paramTys bodyTy
-        return $ Ok (def :<: unsafeToNoAlias VoidTy)
-      Err err -> return $ Err err `addError` msg
-        where msg = "The body of function" +++ codeIdent name +++ "does not match expected type" +++ code retTy
-    where notVoidMsg = "A function definition expression has type" +++ code VoidTy
+        return $ def :<: unsafeToNoAlias VoidTy
+      -- TODO[Err]: can this be added to failure of `check body retTy`?
+      else fail $ "The body of function" +++ codeIdent name +++ "does not match expected type" +++ code retTy
+    where
+      notVoidMsg = "A function definition expression has type" +++ code VoidTy
 
   -- For when the return type is NOT specified.
   check (Ast.DefF name params Nothing body :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    (paramTys, bodyRes) <- inNewScope $ do
-      paramTys <- forM params $ uncurry define
-      bodyRes <- infer body
-      return (paramTys, bodyRes)
-    case bodyRes of
-      Ok body'@(_ :<: DestructureNoAlias bodyTy) -> do
-        let def = Ast.DefF name params Nothing body'
-        define name $ FnTy paramTys bodyTy
-        return $ Ok (def :<: unsafeToNoAlias VoidTy)
-      Err err -> return $ Err err `addError` msg
-        where msg = "The type of body of function" +++ codeIdent name +++ "can't be inferred"
+    (paramTys, body'@(_ :<: DestructureNoAlias bodyTy)) <- inNewScope $ do
+      paramTys <- forA params $ uncurry define
+      body' <- infer body
+      return (paramTys, body')
+    let def = Ast.DefF name params Nothing body'
+    define name $ FnTy paramTys bodyTy
+    return $ def :<: unsafeToNoAlias VoidTy
+      -- TODO[Err]:
+      -- Err err -> return $ Err err `addError` msg
+      --   where msg = "The type of body of function" +++ codeIdent name +++ "can't be inferred"
     where notVoidMsg = "A function definition expression has type" +++ code VoidTy +++ "not" +++ code ty
 
   check (Ast.ModF name items :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    itemsRes <- sequenceA <$> mapM infer items
-    case itemsRes of
-      Ok items' -> return $ Ok $ Ast.ModF name items' :<: unsafeToNoAlias VoidTy
-      Err err -> return $ Err err
+    items' <- mapA infer items
+    return $ Ast.ModF name items' :<: unsafeToNoAlias VoidTy
     where notVoidMsg = "A module definition has type" +++ code VoidTy +++ "not" +++ code ty
 
   -- Default case.
   check expr ty = do
     -- Switch from checking to inferring.
-    exprRes <- infer expr
-    case exprRes of
-      Ok expr'@(_ :<: DestructureNoAlias exprTy) -> ensureM (exprTy <: ty) notSubtypeMsg $ do
-        return $ Ok expr'
-        where notSubtypeMsg = "The expression" +++ code expr +++ "has type" +++ code exprTy ++ ", not" +++ code ty
-      err -> return $ err `addError` msg
-        where msg = "The expression" +++ code expr +++ "doesn't typecheck"
+    expr'@(_ :<: DestructureNoAlias exprTy) <- infer expr
+    let notSubtypeMsg = "The expression" +++ code expr +++ "has type" +++ code exprTy ++ ", not" +++ code ty
+    ensureM (exprTy <: ty) notSubtypeMsg $ do
+      return expr'
+      -- TODO[Err]:
+      -- err -> return $ err `addError` msg
+      --   where msg = "The expression" +++ code expr +++ "doesn't typecheck"
 
 checkSameType :: Ast.Seq Ast.Expr -> Ast.Seq Ast.Expr
               -> TyChecker (Res (Ast.Seq Ast.TypedExpr, Ast.Seq Ast.TypedExpr, Ty))
 checkSameType e1 e2 = do
-  e1Res <- infer e1
-  e2Res <- infer e2
-  case (e1Res, e2Res) of
-    (Ok (e1', DestructureNoAlias t1), Ok (e2', DestructureNoAlias t2)) -> do
-      meetRes <- t1 >||< t2
-      return $ (e1', e2',) <$> (meetRes `toRes` RootCause msg)
-        where msg = "The types" +++ code t1 +++ "and" +++ code t2 +++ "can't be joined"
-    (Err err1, Err err2) -> return $ Err err1 *> Err err2
-    (Ok _, Err err) -> return $ Err err
-    (Err err, Ok _) -> return $ Err err
-
+  (e1', DestructureNoAlias t1) <- infer e1
+  (e2', DestructureNoAlias t2) <- infer e2
+  meetRes <- t1 >||< t2
+  let msg = "The types" +++ code t1 +++ "and" +++ code t2 +++ "can't be joined"
+  return $ (e1', e2',) <$> (meetRes `toRes` RootCause msg)
 
 astToTypedAst :: CheckType a => a -> Res (Checked a)
-astToTypedAst ast = evalState (infer ast) initTcx
+astToTypedAst ast = evalStateT (infer ast) initTcx
