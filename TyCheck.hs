@@ -531,6 +531,9 @@ instance CheckType Ast.Expr where
         yesRes <- check yes (condTy -&&> ty)
         noRes <- check no (condTy -&&> ty)
         case (yesRes, noRes) of
+          (Ok _, Err err) -> return $ Err err
+          (Err err, Ok _) -> return $ Err err
+          (Err yesErr, Err noErr) -> return (Err yesErr *> Err noErr)
           (Ok (yes', DestructureNoAlias yesTy), Ok (no', DestructureNoAlias noTy)) -> do
             let ifExpr = Ast.IfF cond' yes' no'
             meet <- yesTy >||< noTy
@@ -540,9 +543,6 @@ instance CheckType Ast.Expr where
               Ok meetTy -> do
                 tyRes <- toNoAlias meetTy
                 return $ (ifExpr :<:) <$> tyRes
-          (Ok _, Err err) -> return $ Err err
-          (Err err, Ok _) -> return $ Err err
-          (Err yesErr, Err noErr) -> return (Err yesErr *> Err noErr)
 
   check (Ast.MatchF scrut arms :@: loc) ty = do
     scrutRes <- infer scrut
