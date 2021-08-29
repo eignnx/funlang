@@ -21,13 +21,15 @@ module Tcx
   , unsafeToNoAlias
   , mapA
   , forA
+  , pairA
+  , withErrMsg
   )
 where
 
 import Ty (Ty(..))
 import qualified Data.Map as M
 import Control.Monad.State (MonadState(get, put), gets, modify, lift, StateT (runStateT), State, withState, withStateT)
-import Res (Res (Ok, Err), Error (RootCause), toRes)
+import Res (Res (Ok, Err), Error (RootCause), toRes, addError)
 import Utils (code, (+++), codeIdent)
 import Data.List (find)
 import Control.Monad (foldM, forM, join, liftM, filterM)
@@ -35,6 +37,7 @@ import Data.Monoid (All(All, getAll))
 import GHC.Base (Functor)
 import Data.Maybe (fromJust, isJust)
 import Debug.Trace (trace, traceM)
+import Data.Foldable (Foldable(fold, toList))
 
 type Tcx = [TcxElem]
 
@@ -325,3 +328,17 @@ mapA f as = do
 
 forA :: [a] -> (a -> TyChecker b) -> TyChecker [b]
 forA as f = mapA f as
+
+pairA :: (TyChecker a, TyChecker a) -> TyChecker (a, a)
+pairA (m1, m2) = do
+  asdf <- mapA id [m1, m2]
+  case asdf of
+    [a1, a2] -> return (a1, a2)
+    _ -> error "Internal Compiler Error: You misused `pairA`!"
+
+withErrMsg :: TyChecker a -> String -> TyChecker a
+withErrMsg program msg = do
+  st <- get
+  case runStateT program st of
+    Ok (a, st') -> withStateT (const st') $ return a
+    Err err -> lift $ Err err `addError` msg
