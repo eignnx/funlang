@@ -193,8 +193,7 @@ instance CheckType Ast.Expr where
         tyNoAliasRes <- toNoAlias ty
         let var = Ast.VarF name
         return $ (var :<:) <$> tyNoAliasRes
-      Err err -> return $ Err err `addError` msg
-        where msg = "I can't type check the variable at" +++ show loc
+      Err err -> return $ Err err
 
   infer (Ast.LiteralF x :@: loc) =
     case x of
@@ -251,8 +250,7 @@ instance CheckType Ast.Expr where
     seqRes <- infer seq
     case seqRes of
       Ok (seq', ty) -> return $ Ok $ Ast.BlockF seq' :<: ty
-      Err err -> return $ Err err `addError` msg
-        where msg = "I can't type check the block at" +++ show loc
+      Err err -> return $ Err err
 
   -- The runtime imposes the following order on the execution of a `Call`
   -- expression:
@@ -276,8 +274,7 @@ instance CheckType Ast.Expr where
             let ty = operationalArgsType args' -&&> retTy
             tyNoAliasRes <- toNoAlias ty
             return $ (call :<:) <$> tyNoAliasRes
-          Err err -> return $ Err err `addError` msg
-            where msg = "I can't type check the function call at" +++ show loc
+          Err err -> return $ Err err
       Ok fn'@(_ :<: DestructureNoAlias NeverTy) -> do
         -- Oops! Well, let's make the best of it. Try inferring args.
         argsRes <- sequenceA <$> mapM infer args
@@ -519,8 +516,7 @@ instance CheckType Ast.Expr where
     seqRes <- check seq ty
     case seqRes of
       Ok (seq', ty) -> return $ Ok $ Ast.BlockF seq' :<: ty
-      Err err -> return $ Err err `addError` msg
-        where msg = "I can't type check the block at" +++ show loc
+      Err err -> return $ Err err
 
   -- An `if` expression has two sequentially-executed sub-expressions:
   --  1. The conditional expression, and
