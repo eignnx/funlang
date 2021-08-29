@@ -19,12 +19,14 @@ module Tcx
   , NoAliasTy(..)
   , toNoAlias
   , unsafeToNoAlias
+  , mapA
+  , forA
   )
 where
 
 import Ty (Ty(..))
 import qualified Data.Map as M
-import Control.Monad.State (State, MonadState(get, put), gets, modify, lift)
+import Control.Monad.State (MonadState(get, put), gets, modify, lift, StateT (runStateT), State, withState, withStateT)
 import Res (Res (Ok, Err), Error (RootCause), toRes)
 import Utils (code, (+++), codeIdent)
 import Data.List (find)
@@ -58,7 +60,7 @@ initTcx = [ AliasBind "Never" NeverTy
           , AliasBind "Text" TextTy
           ]
 
-type TyChecker = State Tcx
+type TyChecker = StateT Tcx Res
 
 (<:) :: Ty -> Ty -> TyChecker Bool
 NeverTy <: t2 = return True
@@ -68,16 +70,12 @@ t1 <: t2 | t1 == t2 = return True
 ValTy n1 <: ValTy n2 = return $ n1 == n2
 
 AliasTy name <: ty = do
-  tyRes <- resolveAlias name
-  case tyRes of
-    Ok resolved -> resolved <: ty
-    Err err -> error $ show err
+  resolved <- resolveAlias name
+  resolved <: ty
 
 ty <: AliasTy name = do
-  tyRes <- resolveAlias name
-  case tyRes of
-    Ok resolved -> ty <: resolved
-    Err err -> error $ show err
+  resolved <- resolveAlias name
+  ty <: resolved
 
 VrntTy vs1 <: VrntTy vs2 = do
   isSubmapOfM ctorSubtype vs1 vs2
@@ -162,7 +160,7 @@ a >||< b = do
     (False, False) -> do
       return Nothing
 
-inNewScope :: TyChecker a -> TyChecker a
+inNewScope :: Monad m => StateT s m a -> StateT s m a
 inNewScope prog = do
   st <- get -- Save old state
   res <- prog
@@ -171,63 +169,59 @@ inNewScope prog = do
 
 define :: String -> Ty -> TyChecker Ty
 define name ty = do
-  ctx <- get
-  put $ VarBind name ty : ctx
+  tcx <- get
+  put $ VarBind name ty : tcx
   return ty
 
 setFnRetTy :: Ty -> TyChecker Ty
 setFnRetTy = define "#ret"
 
-varLookup :: String -> TyChecker (Res Ty)
+varLookup :: String -> TyChecker Ty
 varLookup name = do
-  ctx <- get
-  let reason = RootCause ("The variable" +++ codeIdent name +++ "is not declared anywhere.")
-  let res = toRes (tcxLookupVar name ctx) reason
-  return res
+  tcx <- get
+  let res = toRes (tcxLookupVar name tcx) reason
+  lift res
+    where reason = RootCause ("The variable" +++ codeIdent name +++ "is not declared anywhere.")
 
 getFnRetTy :: TyChecker Ty
 getFnRetTy = do
-  ctx <- get
-  case tcxLookupVar "#ret" ctx of
+  tcx <- get
+  case tcxLookupVar "#ret" tcx of
     Just ty -> return ty
-    Nothing -> error "Internal Compiler Error: couldn't find `#ret` in `ctx`!"
+    Nothing -> error "Internal Compiler Error: couldn't find `#ret` in `tcx`!"
 
 defineTyAlias :: String -> Ty -> TyChecker ()
 defineTyAlias name ty = do
-  ctx <- get
-  put $ AliasBind name ty : ctx
+  tcx <- get
+  put $ AliasBind name ty : tcx
 
-resolveAlias :: String -> TyChecker (Res Ty)
+resolveAlias :: String -> TyChecker Ty
 resolveAlias name = do
-  ctx <- get
-  case find (searcher name) ctx of
-    Just (AliasBind _ ty) -> return $ Ok ty
-    _ -> return $ Err $ RootCause msg
-      where msg = "I'm not aware of a type called" +++ codeIdent name
+  tcx <- get
+  case find (searcher name) tcx of
+    Just (AliasBind _ ty) -> return ty
+    _ -> fail $ "I'm not aware of a type called" +++ codeIdent name
   where
     searcher n1 = \case
       AliasBind n2 ty -> n1 == n2
       _ -> False
 
-resolveAsVrnts :: Ty -> TyChecker (Res (M.Map String [Ty]))
+resolveAsVrnts :: Ty -> TyChecker (M.Map String [Ty])
 resolveAsVrnts = \case
-  VrntTy vrnts -> return $ Ok vrnts
+  VrntTy vrnts -> return vrnts
   AliasTy name -> resolveAliasAsVrnts name
   TyVar name -> do
-    res <- resolveTyVar name
-    case res of
-      Ok ty -> resolveAsVrnts ty
-      Err err -> return $ Err err
+    ty <- resolveTyVar name
+    resolveAsVrnts ty
   r@(RecTy x body) -> do
     modify $ \tcx -> TyVarBind x r : tcx
     resolveAsVrnts body
-  other -> return $ Err $ RootCause msg
-    where msg = "I was expecting a variant type, but got" +++ code other
+  other -> fail $ "I was expecting a variant type, but got" +++ code other
 
-resolveAliasAsVrnts :: String -> TyChecker (Res (M.Map String [Ty]))
+resolveAliasAsVrnts :: String -> TyChecker (M.Map String [Ty])
 resolveAliasAsVrnts name = do
-  res <- resolveAlias name
-  return $ res >>= assumeVrnt
+  ty <- resolveAlias name
+  lift $ assumeVrnt ty
 
 assumeVrnt :: Ty -> Res (M.Map String [Ty])
 assumeVrnt = \case
@@ -235,11 +229,10 @@ assumeVrnt = \case
   other -> Err $ RootCause msg
     where msg = "I was expecting a variant type, but got" +++ code other
 
-resolveTyVar :: String -> TyChecker (Res Ty)
+resolveTyVar :: String -> TyChecker Ty
 resolveTyVar name = do
   -- TODO: report errors from `fromJust` and `head`
-  found <- gets (head . fromJust . mapM findTyVar)
-  return $ Ok found
+  gets (head . fromJust . mapM findTyVar)
   where
     findTyVar (TyVarBind x ty) | x == name = Just ty
     findTyVar _ = Nothing
@@ -266,53 +259,69 @@ unsafeToNoAlias ty
             RecTy tyVar body -> trulyHasNoAliases body
             TyVar name -> True
 
-toNoAlias :: Ty -> TyChecker (Res NoAliasTy)
+toNoAlias :: Ty -> TyChecker NoAliasTy
 toNoAlias = \case
 
-  ValTy name -> return $ Ok $ unsafeToNoAlias $ ValTy name
+  ValTy name -> return $ unsafeToNoAlias $ ValTy name
 
   AliasTy name -> do
-    res <- resolveAlias name
-    case res of
-      Ok ty -> do
-        toNoAlias ty -- Make sure we recursively remove any aliases from result.
-      Err err -> return $ Err err
+    ty <- resolveAlias name
+    toNoAlias ty -- Make sure we recursively remove any aliases from result.
 
   VrntTy vrnts -> do
-    vrntsRes <- forM (M.toList vrnts) $ \(ctorName, ctorParams) -> do
-      ctorParams' <- sequenceA <$> mapM toNoAlias ctorParams
-      let unwrapped = map getNoAlias <$> ctorParams'
-      return $ (ctorName,) <$> unwrapped
-    let vrnts' = M.fromList <$> sequenceA vrntsRes
-    return $ unsafeToNoAlias . VrntTy <$> vrnts'
+    vrnts <- forM (M.toList vrnts) $ \(ctorName, ctorParams) -> do
+      ctorParams' <- mapM toNoAlias ctorParams
+      let unwrapped = map getNoAlias ctorParams'
+      return (ctorName, unwrapped)
+    let vrnts' = M.fromList vrnts
+    return $ unsafeToNoAlias $ VrntTy vrnts'
 
   TupleTy ts -> do
-    tsRes <- forM ts $ \ty -> do
+    ts <- forM ts $ \ty -> do
       ty' <- toNoAlias ty
-      return $ getNoAlias <$> ty'
-    let ts' = sequenceA tsRes
-    return $ unsafeToNoAlias . TupleTy <$> ts'
+      return $ getNoAlias ty'
+    return $ unsafeToNoAlias $ TupleTy ts
 
   FnTy params ret -> do
-    paramsRes <- forM params $ \ty -> do
+    params <- forM params $ \ty -> do
       ty' <- toNoAlias ty
-      return $ getNoAlias <$> ty'
-    let params' = sequenceA paramsRes
+      return $ getNoAlias ty'
     retRes <- toNoAlias ret
-    let ret' = getNoAlias <$> retRes
-    let fn = FnTy <$> params' <*> ret'
-    return $ unsafeToNoAlias <$> fn
+    let ret' = getNoAlias retRes
+    let fn = FnTy params ret'
+    return $ unsafeToNoAlias fn
 
   ModTy m -> do
     mRes <- forM (M.toList m) $ \(name, ty) -> do
       ty' <- toNoAlias ty
-      return $ (name,) . getNoAlias <$> ty'
-    let m' = M.fromList <$> sequenceA mRes
-    return $ unsafeToNoAlias . ModTy <$> m'
+      return (name, getNoAlias ty')
+    let m' = M.fromList mRes
+    return $ unsafeToNoAlias $ ModTy m'
 
   RecTy tyVar body -> do
     bodyRes <- toNoAlias body
-    return $ unsafeToNoAlias . RecTy tyVar . getNoAlias <$> bodyRes
+    return $ unsafeToNoAlias $ RecTy tyVar $ getNoAlias bodyRes
 
   TyVar name ->
-    return $ Ok $ unsafeToNoAlias $ TyVar name
+    return $ unsafeToNoAlias $ TyVar name
+
+-- | The function `mapA` has same signature as `sequenceA . map`, but whereas
+--   the latter would short-circuit on the first failure, `mapA` accumulates
+--   failures.
+mapA :: (a -> TyChecker b) -> [a] -> TyChecker [b]
+mapA f as = do
+  st <- get
+  go st [] as
+  where
+    -- go :: Tcx -> [Res b] -> [a] -> TyChecker [b]
+    go st bs [] =
+      -- We need to run the rest of the program (beyond the `mapA` call) using
+      -- the modified state.
+      withStateT (const st) (lift $ sequenceA bs)
+    go st bs (a:as) = do
+      case runStateT (f a) st of
+        Ok (b, st') -> go st' (Ok b:bs) as
+        Err err -> go st (Err err:bs) as -- Use old state here? Sure. Why not.
+
+forA :: [a] -> (a -> TyChecker b) -> TyChecker [b]
+forA as f = mapA f as

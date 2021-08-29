@@ -1,4 +1,4 @@
-def never-if[] -> Int do
+def never_if[] -> Int do
   if true then
     intr.exit[]
   else
