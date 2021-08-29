@@ -5,7 +5,7 @@
 # has type `Never.`
 
 def never_unary[] -> Never do
-  (not (intr.exit[] : Never)) : Never;
+  (not (intr.exit[] as Never)) as Never;
 end
 
 def never_binary[] -> Never do
@@ -32,6 +32,13 @@ def never_if_cond[] -> Never do
     nop
   else
     nop
+  end
+end
+
+def never_match_scrut[] -> Never do
+  match intr.exit[]
+    | {:Blah} => nop
+    | {:Blergh} => nop
   end
 end
 

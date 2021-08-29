@@ -358,23 +358,23 @@ instance CheckType Ast.Expr where
 --   -- infer ctx fn@(FnExpr (Infer param) body) =
 --   --   Err $ RootCause $ "I can't infer the type of the parameter `" ++ param ++ "` in the function `" ++ show fn ++ "`"
 
-  -- To INFER the type of an if expression:
-  --   1. INFER one of it's branches, then
-  --   2. CHECK that the whole if expr has that type.
-  -- NOTE #1: We only need to be able to INFER one (1) of the branches.
-  -- NOTE #2: The traslation to Ast.TypedExpr will be done by `check`.
-  infer (Ast.IfF cond yes no :@: loc) = do
-    condRes <- check cond BoolTy
-    bodyRes <- checkSameType yes no
-    case (condRes, bodyRes) of
-      (Ok cond', Ok (yes', no', bodyTy)) -> do
-        let _ :<: DestructureNoAlias condTy = cond'
-        let ifExpr = Ast.IfF cond' yes' no'
-        tyNoAliasRes <- toNoAlias $ condTy -&&> bodyTy
-        return $ (ifExpr :<:) <$> tyNoAliasRes
-      (_, Err err) -> return $ condRes *> (Err err `addError` msg)
-        where msg = "The two branches of this `if` expression have different types"
-      _ -> return $ condRes <* bodyRes
+  -- -- To INFER the type of an if expression:
+  -- --   1. INFER one of it's branches, then
+  -- --   2. CHECK that the whole if expr has that type.
+  -- -- NOTE #1: We only need to be able to INFER one (1) of the branches.
+  -- -- NOTE #2: The traslation to Ast.TypedExpr will be done by `check`.
+  -- infer (Ast.IfF cond yes no :@: loc) = do
+  --   condRes <- check cond BoolTy
+  --   bodyRes <- checkSameType yes no
+  --   case (condRes, bodyRes) of
+  --     (Ok cond', Ok (yes', no', bodyTy)) -> do
+  --       let _ :<: DestructureNoAlias condTy = cond'
+  --       let ifExpr = Ast.IfF cond' yes' no'
+  --       tyNoAliasRes <- toNoAlias $ condTy -&&> bodyTy
+  --       return $ (ifExpr :<:) <$> tyNoAliasRes
+  --     (_, Err err) -> return $ condRes *> (Err err `addError` msg)
+  --       where msg = "The two branches of this `if` expression have different types"
+  --     _ -> return $ condRes <* bodyRes
 
   -- A while expression does NOT return the never type. This is because
   -- usually, it does not infinitely loop. It usually loops until the
@@ -528,20 +528,25 @@ instance CheckType Ast.Expr where
   -- Therefore, the type of an `if` expression ought to be `condTy -&&> branchTy`.
   check (Ast.IfF cond yes no :@: loc) ty = do
     condRes <- check cond BoolTy
-    yesRes <- check yes ty
-    noRes <- check no ty
-    case (condRes, yesRes, noRes) of
-      (Ok cond'@(_ :<: DestructureNoAlias condTy), Ok (yes', _), Ok (no', _)) -> do
-        let ifExpr = Ast.IfF cond' yes' no'
-        tyRes <- toNoAlias $ condTy -&&> ty
-        return $ (ifExpr :<:) <$> tyRes
-      (condErr@(Err _), yesRes, noRes) ->
-        return (condErr' <* yesRes <* noRes)
-          where condErr' = condErr `addError` msg
-                msg = "The condition of an `if` must have type" +++ code BoolTy ++ ", but this one doesn't"
-      (_, Err yesErr, Err noErr) -> return $ Err yesErr *> Err noErr
-      (_, _, Err noErr) -> return $ Err noErr
-      (_, Err yesErr, _) -> return $ Err yesErr
+    case condRes of
+      Err condErr -> return $ Err condErr `addError` msg
+        where msg = "The condition of an `if` must have type" +++ code BoolTy ++ ", but this one doesn't"
+      Ok cond'@(_ :<: DestructureNoAlias condTy) -> do
+        yesRes <- check yes (condTy -&&> ty)
+        noRes <- check no (condTy -&&> ty)
+        case (yesRes, noRes) of
+          (Ok (yes', DestructureNoAlias yesTy), Ok (no', DestructureNoAlias noTy)) -> do
+            let ifExpr = Ast.IfF cond' yes' no'
+            meet <- yesTy >||< noTy
+            let maybeNeverMeet = ((condTy -&&>) <$> meet) `toRes` RootCause "Can't join"
+            case maybeNeverMeet of
+              Err err -> return $ Err err
+              Ok meetTy -> do
+                tyRes <- toNoAlias meetTy
+                return $ (ifExpr :<:) <$> tyRes
+          (Ok _, Err err) -> return $ Err err
+          (Err err, Ok _) -> return $ Err err
+          (Err yesErr, Err noErr) -> return (Err yesErr *> Err noErr)
 
   check (Ast.MatchF scrut arms :@: loc) ty = do
     scrutRes <- infer scrut
