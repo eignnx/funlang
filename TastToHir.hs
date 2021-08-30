@@ -25,7 +25,7 @@ import           Data.Foldable
 import qualified Data.Map.Strict               as M
 import           Data.List                     ( find )
 import           Debug.Trace                   ( trace )
-import Tcx (NoAliasTy(DestructureNoAlias), unsafeToNoAlias)
+import Tcx (NoAliasTy(NoAliasPat), unsafeToNoAlias)
 
 type Descriminant = Int
 
@@ -101,7 +101,7 @@ instance Compile (Ast.Seq Ast.TypedExpr) where
 
   compile (Ast.Result expr) = compile expr
 
-  compile (Ast.Semi expr@(exprF :<: DestructureNoAlias ty) seq)
+  compile (Ast.Semi expr@(exprF :<: NoAliasPat ty) seq)
     | isZeroSized ty = do -- Already Void type, no need to Pop.
       expr' <- compile expr
       seq' <- compile seq
@@ -137,7 +137,7 @@ instance Compile (Ast.RefutPat, Hir.Lbl, NoAliasTy) where
     (Ast.VarRefutPat name, _, _) ->
       return [Hir.Store name]
 
-    (ast@(Ast.VrntRefutPat name params), next, DestructureNoAlias (Ty.RecTy x body)) -> do
+    (ast@(Ast.VrntRefutPat name params), next, NoAliasPat (Ty.RecTy x body)) -> do
       let body' = unfoldRecTy x body
       compile (ast, next, unsafeToNoAlias body')
       where
@@ -156,7 +156,7 @@ instance Compile (Ast.RefutPat, Hir.Lbl, NoAliasTy) where
           Ty.FnTy params ret -> Ty.FnTy (map go params) (go ret)
           atomic -> atomic
 
-    (Ast.VrntRefutPat name params, next, DestructureNoAlias (Ty.VrntTy vrnts)) -> do
+    (Ast.VrntRefutPat name params, next, NoAliasPat (Ty.VrntTy vrnts)) -> do
       let Just paramTys = map Tcx.unsafeToNoAlias <$> M.lookup name vrnts
 
       -- Test the discriminant, if test fails, go to to next match arm.
@@ -204,7 +204,7 @@ instance Compile Ast.TypedExpr where
            ++ fn' -- Code to load the function pointer
            ++ [Hir.Call argC]
 
-  compile (Ast.VarF name :<: DestructureNoAlias (Ty.FnTy _ _)) = do
+  compile (Ast.VarF name :<: NoAliasPat (Ty.FnTy _ _)) = do
     maybeLbl <- lookupFnLbl name
     case maybeLbl of
       Just lbl -> do
@@ -212,7 +212,7 @@ instance Compile Ast.TypedExpr where
       Nothing -> do
         return [Hir.Load name]
 
-  compile (Ast.VarF name :<: DestructureNoAlias ty)
+  compile (Ast.VarF name :<: NoAliasPat ty)
     | isZeroSized ty = return []
     | otherwise = return [Hir.Load name]
 
@@ -279,14 +279,14 @@ instance Compile Ast.TypedExpr where
 
   compile (Ast.AnnF expr _ :<: ty) = compile expr
 
-  compile (Ast.LetF pat expr@(_ :<: DestructureNoAlias exprTy) :<: _)
+  compile (Ast.LetF pat expr@(_ :<: NoAliasPat exprTy) :<: _)
     | isZeroSized exprTy = compile expr -- Still gotta run it cause it might have side-effects.
     | otherwise = do
       expr' <- compile expr
       pat' <- compile pat
       return $ expr' ++ pat'
 
-  compile (Ast.AssignF var expr@(_ :<: DestructureNoAlias exprTy) :<: ty) = do
+  compile (Ast.AssignF var expr@(_ :<: NoAliasPat exprTy) :<: ty) = do
     expr' <- compile expr
     let maybeStore = [Hir.Store var | not (isZeroSized exprTy)]
     return $ expr' ++ maybeStore
@@ -306,24 +306,30 @@ instance Compile Ast.TypedExpr where
       ++ no'
       ++ [Hir.Label endLbl :# "End of `if` expr"]
 
-  compile (Ast.MatchF scrut@(_ :<: patTy) arms :<: ty) = do
-    matchEnd <- fresh
-    scrut'   <- compile scrut
-    arms'    <- forM arms $ \(refutPat, body) -> do
-      next      <- fresh
-      refutPat' <- compile (refutPat, next, patTy)
-      body'     <- compile body
-      return
-        $  [Hir.Dup :# "Make a copy of scrutinee for next arm"]
-        ++ refutPat'
-        ++ [Hir.Pop :# "Next arm will not be reached, pop its copy of scrutinee"]
-        ++ body'
-        ++ [Hir.Jmp matchEnd :# "Break out of match"]
-        ++ [Hir.Label next :# "Next match branch"]
-    return
-      $  scrut'
-      ++ concat arms'
-      ++ [Hir.Label matchEnd :# "Match end"]
+  compile (Ast.MatchF scrut@(_ :<: scrutTy) arms :<: ty) = do
+    scrut' <- compile scrut
+
+    -- Look. If the scrutinee has type `Never`, we don't need to compile the
+    -- arms. Things get hairy if you try.
+    if scrutTy == unsafeToNoAlias Ty.NeverTy
+      then return scrut'
+      else do
+        matchEnd <- fresh
+        arms'    <- forM arms $ \(refutPat, body) -> do
+          next      <- fresh
+          refutPat' <- compile (refutPat, next, scrutTy)
+          body'     <- compile body
+          return
+            $  [Hir.Dup :# "Make a copy of scrutinee for next arm"]
+            ++ refutPat'
+            ++ [Hir.Pop :# "Next arm will not be reached, pop its copy of scrutinee"]
+            ++ body'
+            ++ [Hir.Jmp matchEnd :# "Break out of match"]
+            ++ [Hir.Label next :# "Next match branch"]
+        return
+          $  scrut'
+          ++ concat arms'
+          ++ [Hir.Label matchEnd :# "Match end"]
 
   compile (Ast.WhileF cond body :<: ty) = do
     cond' <- compile cond

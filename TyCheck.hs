@@ -43,7 +43,7 @@ import           Data.Semigroup
 import Control.Monad.State ( evalStateT, foldM, MonadTrans(lift), StateT (runStateT) )
 import           Control.Applicative
 import Data.Maybe ( fromMaybe )
-import Debug.Trace (trace)
+import Debug.Trace (trace, traceM)
 
 class CheckType a where
   type Checked a :: *
@@ -72,7 +72,11 @@ instance CheckType Ast.Pat where
 instance CheckType Ast.RefutPat where
   type Checked Ast.RefutPat = Ast.RefutPat
 
-  infer = undefined
+  infer (Ast.VrntRefutPat name params) = do
+    params' <- forA params infer
+    return $ Ast.VrntRefutPat name params'
+
+  infer pat = fail $ "I can't infer the type of pattern" +++ code pat ++ ". Consider annotating?"
 
   check (Ast.VarRefutPat name) ty = do
     define name ty
@@ -80,13 +84,12 @@ instance CheckType Ast.RefutPat where
 
   check pat@(Ast.VrntRefutPat name params) someVrnt = do
     vrnts <- resolveAsVrnts someVrnt
-    case M.lookup name vrnts of
-      Nothing -> fail msg
-        where msg = "I don't know what" +++ codeIdent name +++ "refers to in the pattern" +++ code pat
-      Just expectedParamTys -> do
-        params' <- forA (zip params expectedParamTys) $ \(param, expectedTy) -> do
-          check param expectedTy
-        return $ Ast.VrntRefutPat name params'
+    expectedParamTys <- lift $ M.lookup name vrnts `toRes` RootCause badName
+    params' <- forA (zip params expectedParamTys) $ \(param, expectedTy) -> do
+      check param expectedTy
+    return $ Ast.VrntRefutPat name params'
+    where
+      badName = "I don't know what" +++ codeIdent name +++ "refers to in the pattern" +++ code pat
 
 instance CheckType (Ast.Seq Ast.Expr) where
 
@@ -101,24 +104,25 @@ instance CheckType (Ast.Seq Ast.Expr) where
     return (result, ty)
 
   infer (Ast.Semi e seq) = do
-    e'@(_ :<: DestructureNoAlias eTy) <- infer e
-    (seq', DestructureNoAlias seqTy) <- infer seq
+    e'@(_ :<: NoAliasPat eTy) <- infer e
+    (seq', NoAliasPat seqTy) <- infer seq
     let semi = Ast.Semi e' seq'
     let ty = unsafeToNoAlias $ eTy -&&> seqTy
     return (semi, ty)
 
-  check Ast.Empty ty = ensureM (ty <: VoidTy) msg $ do
+  check Ast.Empty ty = ensureM (ty <: VoidTy) (notVoid ty) $ do
     return (Ast.Empty, unsafeToNoAlias VoidTy)
-    where msg = "An empty sequence has type" +++ code VoidTy +++ "not" +++ code ty
+    where
+      notVoid ty = "An empty sequence has type" +++ code VoidTy +++ "not" +++ code ty
 
   check (Ast.Result e) ty = do
-    e'@(_ :<: ty) <- check e ty
+    e'@(_ :<: eTy) <- check e ty
     let result = Ast.Result e'
-    return (result, ty)
+    return (result, eTy)
 
   check (Ast.Semi e seq) ty = do
-    e'@(_ :<: DestructureNoAlias eTy) <- check e VoidTy
-    (seq', DestructureNoAlias seqTy) <- check seq ty
+    e'@(_ :<: NoAliasPat eTy) <- check e VoidTy
+    (seq', NoAliasPat seqTy) <- check seq ty
     let semi = Ast.Semi e' seq'
     let ty = unsafeToNoAlias $ eTy -&&> seqTy
     return (semi, ty)
@@ -213,7 +217,7 @@ instance CheckType Ast.Expr where
   infer (Ast.UnaryF op@Ast.Not expr :@: loc) = inferUnaryOp op BoolTy BoolTy expr
   infer (Ast.UnaryF op@Ast.Neg expr :@: loc) = inferUnaryOp op IntTy IntTy expr
   infer e@(Ast.UnaryF (Ast.TupleProj idx) expr :@: loc) = do
-    expr'@(_ :<: DestructureNoAlias (TupleTy tys)) <- infer expr
+    expr'@(_ :<: NoAliasPat (TupleTy tys)) <- infer expr
     if fromIntegral idx < length tys
       then do
         let ty = unsafeToNoAlias $ tys !! fromIntegral idx
@@ -242,7 +246,7 @@ instance CheckType Ast.Expr where
   -- HOWEVER: While type-checking, we must FIRST infer the type of `f`, THEN
   -- check that the inferred types of the arguments match `f`'s parameter types.
   infer (Ast.CallF fn args :@: loc) = do
-    fn'@(_ :<: DestructureNoAlias fnTy) <- infer fn
+    fn'@(_ :<: NoAliasPat fnTy) <- infer fn
     case fnTy of
       FnTy paramTys retTy -> do
         args' <- checkArgs fn args paramTys
@@ -266,7 +270,7 @@ instance CheckType Ast.Expr where
     return $ intr :<: tyNoAlias
 
   infer (Ast.LetF pat expr :@: loc) = do
-    expr'@(_ :<: DestructureNoAlias exprTy) <- infer expr
+    expr'@(_ :<: NoAliasPat exprTy) <- infer expr
     pat <- check pat exprTy `withErrMsg` badPat pat
     let ty = unsafeToNoAlias $ exprTy -&&> VoidTy
     let letExpr = Ast.LetF pat expr'
@@ -276,7 +280,7 @@ instance CheckType Ast.Expr where
 
   infer (Ast.AssignF name expr :@: loc) = do
     varTy <- varLookup name `withErrMsg` badLookup name
-    expr'@(_ :<: DestructureNoAlias exprTy) <- check expr varTy `withErrMsg` badVarTy expr name
+    expr'@(_ :<: NoAliasPat exprTy) <- check expr varTy `withErrMsg` badVarTy expr name
     let ty = unsafeToNoAlias $ exprTy -&&> VoidTy
     let assign = Ast.AssignF name expr'
     return $ assign :<: ty
@@ -285,7 +289,7 @@ instance CheckType Ast.Expr where
       badVarTy expr name = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
 
   infer (Ast.LetConstF name expr :@: loc) = do
-    expr'@(_ :<: DestructureNoAlias exprTy) <- infer expr `withErrMsg` badInfer name
+    expr'@(_ :<: NoAliasPat exprTy) <- infer expr `withErrMsg` badInfer name
     define name exprTy
     let ty = unsafeToNoAlias $ exprTy -&&> VoidTy
     let letConst = Ast.LetConstF name expr'
@@ -295,7 +299,7 @@ instance CheckType Ast.Expr where
 
   infer (Ast.RetF expr :@: loc) = do
     fnRetTy <- getFnRetTy
-    expr'@(_ :<: DestructureNoAlias exprTy) <- check expr fnRetTy
+    expr'@(_ :<: NoAliasPat exprTy) <- check expr fnRetTy
     let ret = Ast.RetF expr'
     -- The `-&&>` shouldn't be necessary here, but whatever.
     let ty = unsafeToNoAlias $ exprTy -&&> NeverTy
@@ -309,30 +313,12 @@ instance CheckType Ast.Expr where
 --   -- infer ctx fn@(FnExpr (Infer param) body) =
 --   --   Err $ RootCause $ "I can't infer the type of the parameter `" ++ param ++ "` in the function `" ++ show fn ++ "`"
 
-  -- -- To INFER the type of an if expression:
-  -- --   1. INFER one of it's branches, then
-  -- --   2. CHECK that the whole if expr has that type.
-  -- -- NOTE #1: We only need to be able to INFER one (1) of the branches.
-  -- -- NOTE #2: The traslation to Ast.TypedExpr will be done by `check`.
-  -- infer (Ast.IfF cond yes no :@: loc) = do
-  --   condRes <- check cond BoolTy
-  --   bodyRes <- checkSameType yes no
-  --   case (condRes, bodyRes) of
-  --     (Ok cond', Ok (yes', no', bodyTy)) -> do
-  --       let _ :<: DestructureNoAlias condTy = cond'
-  --       let ifExpr = Ast.IfF cond' yes' no'
-  --       tyNoAliasRes <- toNoAlias $ condTy -&&> bodyTy
-  --       return $ (ifExpr :<:) <$> tyNoAliasRes
-  --     (_, Err err) -> return $ condRes *> (Err err `addError` msg)
-  --       where msg = "The two branches of this `if` expression have different types"
-  --     _ -> return $ condRes <* bodyRes
-
   -- A while expression does NOT return the never type. This is because
   -- usually, it does not infinitely loop. It usually loops until the
   -- condition is no longer true, then ends, yielding void.
   infer (Ast.WhileF cond body :@: loc) = do
-    cond'@(_ :<: DestructureNoAlias condTy) <- check cond BoolTy `withErrMsg` badCond
-    body'@(_ :<: DestructureNoAlias bodyTy) <- check body VoidTy `withErrMsg` badBody
+    cond'@(_ :<: NoAliasPat condTy) <- check cond BoolTy `withErrMsg` badCond
+    body'@(_ :<: NoAliasPat bodyTy) <- check body VoidTy `withErrMsg` badBody
     let while = Ast.WhileF cond' body'
     let ty = unsafeToNoAlias $ condTy -&&> bodyTy
     return $ while :<: ty
@@ -359,7 +345,7 @@ instance CheckType Ast.Expr where
   -- For when the return type IS specified.
   infer (Ast.DefF name params (Just retTy) body :@: loc) = do
     setFnRetTy retTy -- Set fn's return type.
-    (paramTys, body'@(_ :<: DestructureNoAlias bodyTy)) <- inNewScope $ do
+    (paramTys, body'@(_ :<: NoAliasPat bodyTy)) <- inNewScope $ do
       paramTys <- mapA (uncurry define) params -- Note: `mapA` not necc'ry here, could use `mapM`.
       body' <- check body retTy `withErrMsg` badBody name
       return (paramTys, body')
@@ -372,7 +358,7 @@ instance CheckType Ast.Expr where
   -- For when the return type is NOT specified.
   infer (Ast.DefF name params Nothing body :@: loc) = do
     setFnRetTy NeverTy -- We don't know the fn's return type yet! FIXME: seems bad...
-    (paramTys, typedBody@(_ :<: DestructureNoAlias bodyTy)) <- inNewScope $ do
+    (paramTys, typedBody@(_ :<: NoAliasPat bodyTy)) <- inNewScope $ do
       paramTys <- mapA (uncurry define) params -- Note: `mapA` not necc'ry here, could use `mapM`.
       bodyRes <- infer body `withErrMsg` badBody name
       return (paramTys, bodyRes)
@@ -454,36 +440,77 @@ instance CheckType Ast.Expr where
   --  1. The conditional expression, and
   --  2. (One of) the branches.
   -- Therefore, the type of an `if` expression ought to be `condTy -&&> branchTy`.
+  --
+  -- If the type-to-be-checked-against (`ty`) is `Never`, then:
+  --   1. the condition must have type (ie. be a subtype of) `Never`, or
+  --   2. both of the branches must have type `Never`,
+  --   3. or both 1. and 2. must be true.
   check (Ast.IfF cond yes no :@: loc) ty = do
-    cond'@(_ :<: DestructureNoAlias condTy) <- check cond BoolTy `withErrMsg` badCond
-    ((yes', DestructureNoAlias yesTy), (no', DestructureNoAlias noTy)) <- pairA ( check yes (condTy -&&> ty), check no (condTy -&&> ty))
+
+    -- First check the condition against type `Bool`.
+    cond'@(_ :<: NoAliasPat condTy) <- check cond BoolTy `withErrMsg` badCond
+
+    -- If the cond type is `Never`, then we gotta infer, rather than check.
+    condIsNever <- condTy <: NeverTy
+    let tactic = if condIsNever then infer else (`check` ty)
+
+    -- Perform type checking on the branches.
+    ((yes', NoAliasPat yesTy), (no', NoAliasPat noTy)) <- pairA (tactic yes, tactic no)
+
+    -- Join the types of the two branches. This finds the smallest-common-
+    -- supertype the two types.
+    branchTyMaybe <- yesTy >||< noTy
+    branchTyRes <- lift $ branchTyMaybe `toRes` RootCause badJoin
+    branchTy <- toNoAlias branchTyRes
+
+    -- Finally, reconstruct the expression.
     let ifExpr = Ast.IfF cond' yes' no'
-    meet <- yesTy >||< noTy
-    meetTy <- lift $ ((condTy -&&>) <$> meet) `toRes` RootCause "Can't join"
-    meetTy' <- toNoAlias meetTy
-    return $ ifExpr :<: meetTy'
+    return $ ifExpr :<: branchTy
     where
       badCond = "The condition of an `if` must have type" +++ code BoolTy ++ ", but this one doesn't"
+      badJoin = "The branches of an `if` must have the same type, but these don't"
 
   check (Ast.MatchF scrut arms :@: loc) ty = do
-    scrut'@(_ :<: DestructureNoAlias scrutTy) <- infer scrut
+
+    -- First infer the type of the scrutinee.
+    scrut'@(_ :<: NoAliasPat scrutTy) <- infer scrut
+
+    -- Next, for each match arm...
     arms' <- forA arms $ \(refutPat, body) -> inNewScope $ do
+
+      -- If the type of the scrutinee is `Never`, we must perform inference, not
+      -- checking on the patterns and arm bodies.
+      scrutIsNever <- scrutTy <: NeverTy
+      let patTactic = if scrutIsNever then infer else (`check` scrutTy)
+      let armBodyTactic = if scrutIsNever then infer else (`check` ty)
+
       -- Check that all patterns have same type as scrutinee.
-      refutPat' <- check refutPat scrutTy
-      -- And infer the types of all the arm bodies.
-      body' <- check body ty
+      refutPat' <- patTactic refutPat
+
+      -- And typecheck the types of all the arm bodies.
+      body' <- armBodyTactic body
       return (refutPat', body')
-    let armBodyTys = map (\(_, (_, DestructureNoAlias ty)) -> ty) arms'
+
+    -- Extract the types from the arm bodies.
+    let armBodyTys = map (\(_, (_, NoAliasPat ty)) -> ty) arms'
+
+    -- Join the types of the arm bodies. The join operation (`>||<`) finds the
+    -- smallest-common-supertype of the arm bodies.
     let
       reducer :: Maybe Ty -> Ty -> TyChecker (Maybe Ty)
       reducer (Just b) a = b >||< a
       reducer Nothing _ = return Nothing
     retTyMaybe <- foldM reducer (Just ty) armBodyTys
-    let retTyRes = unsafeToNoAlias . (scrutTy -&&>) <$> (retTyMaybe `toRes` RootCause msg)
-          where msg = "The arms of a `match` expression must all have the same type"
+
+    retTy <- lift $ unsafeToNoAlias . (scrutTy -&&>) <$> (retTyMaybe `toRes` RootCause badJoin)
+
     -- TODO: perform exhaustiveness/usefulness checking here.
+    
+    -- Finally, rebuild the expression.
     let arms'' = map (\(refutPat, (body, _)) -> (refutPat, body)) arms'
-    lift $ (Ast.MatchF scrut' arms'' :<:) <$> retTyRes
+    return $ Ast.MatchF scrut' arms'' :<: retTy
+    where
+      badJoin = "The arms of a `match` expression must all have the same type"
 
 --   -- check ctx fn@(FnExpr param body) (FnTy paramTy retTy) =
 --   --   let pName = paramName param
@@ -498,7 +525,7 @@ instance CheckType Ast.Expr where
 --   --   -- check ctx (App (FnExpr var body) binding) ty
 
   check (Ast.LetF pat expr :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    expr'@(_ :<: DestructureNoAlias exprTy) <- infer expr `withErrMsg` badExpr pat
+    expr'@(_ :<: NoAliasPat exprTy) <- infer expr `withErrMsg` badExpr pat
     pat' <- check pat exprTy
     let letExpr = Ast.LetF pat' expr'
     return $ letExpr :<: unsafeToNoAlias (exprTy -&&> VoidTy)
@@ -508,7 +535,7 @@ instance CheckType Ast.Expr where
 
   check (Ast.AssignF name expr :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
     varTy <- varLookup name `withErrMsg` problem expr name
-    expr'@(_ :<: DestructureNoAlias exprTy) <- check expr varTy `withErrMsg` problem expr name
+    expr'@(_ :<: NoAliasPat exprTy) <- check expr varTy `withErrMsg` problem expr name
     let assign = Ast.AssignF name expr'
     return $ assign :<: unsafeToNoAlias (exprTy -&&> VoidTy)
     where
@@ -516,7 +543,7 @@ instance CheckType Ast.Expr where
       problem expr name = "The value" +++ code expr +++ "can't be assigned to variable" +++ codeIdent name
 
   check (Ast.LetConstF name expr :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    expr'@(_ :<: DestructureNoAlias exprTy) <- infer expr `withErrMsg` badInfer name
+    expr'@(_ :<: NoAliasPat exprTy) <- infer expr `withErrMsg` badInfer name
     define name exprTy
     let letConst = Ast.LetConstF name expr'
     return $ letConst :<: unsafeToNoAlias (exprTy -&&> VoidTy)
@@ -526,7 +553,7 @@ instance CheckType Ast.Expr where
 
   -- For when the return type IS specified.
   check (Ast.DefF name params (Just retTy) body :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    (paramTys, body'@(_ :<: DestructureNoAlias bodyTy)) <- inNewScope $ do
+    (paramTys, body'@(_ :<: NoAliasPat bodyTy)) <- inNewScope $ do
       paramTys <- forA params $ uncurry define
       body' <- check body retTy `withErrMsg` badBody name retTy
       return (paramTys, body')
@@ -542,7 +569,7 @@ instance CheckType Ast.Expr where
 
   -- For when the return type is NOT specified.
   check (Ast.DefF name params Nothing body :@: loc) ty = ensureM (ty <: VoidTy) notVoidMsg $ do
-    (paramTys, body'@(_ :<: DestructureNoAlias bodyTy)) <- inNewScope $ do
+    (paramTys, body'@(_ :<: NoAliasPat bodyTy)) <- inNewScope $ do
       paramTys <- forA params $ uncurry define
       body' <- infer body `withErrMsg` badInfer name
       return (paramTys, body')
@@ -562,7 +589,7 @@ instance CheckType Ast.Expr where
   -- Default case.
   check expr ty = do
     -- Switch from checking to inferring.
-    expr'@(_ :<: DestructureNoAlias exprTy) <- infer expr `withErrMsg` badInfer expr
+    expr'@(_ :<: NoAliasPat exprTy) <- infer expr `withErrMsg` badInfer expr
     ensureM (exprTy <: ty) (notSubtype expr exprTy ty) $ do
       return expr'
     where
@@ -572,8 +599,8 @@ instance CheckType Ast.Expr where
 checkSameType :: Ast.Seq Ast.Expr -> Ast.Seq Ast.Expr
               -> TyChecker (Res (Ast.Seq Ast.TypedExpr, Ast.Seq Ast.TypedExpr, Ty))
 checkSameType e1 e2 = do
-  (e1', DestructureNoAlias t1) <- infer e1
-  (e2', DestructureNoAlias t2) <- infer e2
+  (e1', NoAliasPat t1) <- infer e1
+  (e2', NoAliasPat t2) <- infer e2
   meetRes <- t1 >||< t2
   return $ (e1', e2',) <$> (meetRes `toRes` RootCause (badMeet t1 t2))
   where
