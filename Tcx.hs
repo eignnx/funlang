@@ -320,7 +320,7 @@ mapA f as = do
     go st bs [] =
       -- We need to run the rest of the program (beyond the `mapA` call) using
       -- the modified state.
-      withStateT (const st) (lift $ sequenceA bs)
+      withStateT (const st) (lift $ sequenceA $ reverse bs)
     go st bs (a:as) = do
       case runStateT (f a) st of
         Ok (b, st') -> go st' (Ok b:bs) as
