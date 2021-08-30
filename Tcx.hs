@@ -242,7 +242,7 @@ resolveTyVar name = do
 
 -- | A Ty that's guarunteed not to have any AliasTy's. All aliases have been resolved out
 --   of the type.
-newtype NoAliasTy = DestructureNoAlias { getNoAlias :: Ty }
+newtype NoAliasTy = NoAliasPat { getNoAlias :: Ty }
   deriving (Eq, Ord)
 
 instance Show NoAliasTy where
@@ -250,7 +250,7 @@ instance Show NoAliasTy where
 
 unsafeToNoAlias :: Ty -> NoAliasTy
 unsafeToNoAlias ty
-  | trulyHasNoAliases ty = DestructureNoAlias ty
+  | trulyHasNoAliases ty = NoAliasPat ty
   | otherwise = error $ "`unsafeToNoAlias` is unsafe on" +++ code ty
     where trulyHasNoAliases = \case
             AliasTy _ -> False

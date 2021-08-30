@@ -58,3 +58,71 @@ def never_assign[] -> Never do
 end
 
 def main[] = nop
+
+{#
+===HIR===
+  CallDirect (Lbl 11) 0 :# "Call main"
+  Intrinsic Exit :# "Upon return from main, exit"
+Label (Lbl 11) :# "Start of def main"
+  Nop :# "From `nop` expr"
+  Ret :# "End of def main"
+Label (Lbl 10) :# "Start of def never_assign"
+  Const (VInt 1)
+  Store "x"
+  Intrinsic Exit
+  Ret :# "End of def never_assign"
+Label (Lbl 9) :# "Start of def never_let"
+  Intrinsic Exit
+  Ret :# "End of def never_let"
+Label (Lbl 8) :# "Start of def never_while_cond"
+Label (Lbl 14) :# "Top of while loop"
+  Intrinsic Exit
+  JmpIfFalse (Lbl 15) :# "Jmp to end ofwhile loop"
+  Nop :# "From `nop` expr"
+  Jmp (Lbl 14)
+Label (Lbl 15) :# "End of while loop"
+  Ret :# "End of def never_while_cond"
+Label (Lbl 7) :# "Start of def never_match_scrut"
+  Intrinsic Exit
+  Ret :# "End of def never_match_scrut"
+Label (Lbl 6) :# "Start of def never_if_cond"
+  Intrinsic Exit
+  JmpIfFalse (Lbl 12)
+  Nop :# "From `nop` expr"
+  Jmp (Lbl 13)
+Label (Lbl 12) :# "Else branch"
+  Nop :# "From `nop` expr"
+Label (Lbl 13) :# "End of `if` expr"
+  Ret :# "End of def never_if_cond"
+Label (Lbl 5) :# "Start of def never_intr"
+  Intrinsic Exit
+  Intrinsic Puts
+  Ret :# "End of def never_intr"
+Label (Lbl 4) :# "Start of def never_call_fn"
+  Const (VInt 1)
+  Const (VInt 2)
+  Const (VInt 3)
+  Intrinsic Exit
+  Call 3
+  Ret :# "End of def never_call_fn"
+Label (Lbl 3) :# "Start of def never_call_args"
+  Const (VInt 1)
+  Intrinsic Exit
+  Const (VInt 3)
+  CallDirect (Lbl 2) 3
+  Ret :# "End of def never_call_args"
+Label (Lbl 2) :# "Start of def foo"
+  Store "z"
+  Store "y"
+  Store "x"
+  Ret :# "End of def foo"
+Label (Lbl 1) :# "Start of def never_binary"
+  Intrinsic Exit
+  Const (VInt 1)
+  Add
+  Ret :# "End of def never_binary"
+Label (Lbl 0) :# "Start of def never_unary"
+  Intrinsic Exit
+  Not
+  Ret :# "End of def never_unary"
+#}
