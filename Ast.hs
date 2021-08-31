@@ -140,7 +140,7 @@ data RefutPat
 instance Show RefutPat where
   show = \case
     VarRefutPat x -> x
-    VrntRefutPat name args -> braces $ name ++ optList args
+    VrntRefutPat name args -> braces $ name +++ intercalate ", " (map show args)
 
 data BinOp
   = ArithOp ArithOp
