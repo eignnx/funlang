@@ -204,6 +204,17 @@ nopExpr = spanned $ reserved "nop" *> return Ast.NopF
 letExpr :: Parser Ast.Expr
 letExpr = spanned $ Ast.LetF <$> (reserved "let" *> pat) <*> (reservedOp "=" *> expression)
 
+letElseExpr :: Parser Ast.Expr
+letElseExpr = spanned $ do
+  reserved "let"
+  pat <- refutPat
+  reservedOp "="
+  expr <- expression
+  reserved "else"
+  alt <- seqTerminatedBy $ reserved "end"
+  reserved "end"
+  return $ Ast.LetElseF pat expr alt
+
 assignExpr :: Parser Ast.Expr
 assignExpr = spanned $ Ast.AssignF <$> identifier <*> (reservedOp "=" *> expression)
 
@@ -331,6 +342,7 @@ endEndedTerm =  blockExpr
             <|> matchExpr
             <|> whileExpr
             <|> loopExpr
+            <|> letElseExpr
             <|> defExpr
             <|> modExpr
             <|> tyDefExpr

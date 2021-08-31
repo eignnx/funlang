@@ -25,7 +25,7 @@ import           Data.Foldable
 import qualified Data.Map.Strict               as M
 import           Data.List                     ( find )
 import           Debug.Trace                   ( trace )
-import Tcx (NoAliasTy(NoAliasPat), unsafeToNoAlias)
+import Tcx (NoAliasTy(NoAliasPat, getNoAlias), unsafeToNoAlias)
 
 type Descriminant = Int
 
@@ -287,6 +287,25 @@ instance Compile Ast.TypedExpr where
       expr' <- compile expr
       pat' <- compile pat
       return $ expr' ++ pat'
+
+  compile (Ast.LetElseF refutPat expr@(_ :<: exprTy) alt :<: _)
+    | isZeroSized $ getNoAlias exprTy = compile expr -- Still gotta run it cause it might have side-effects.
+    | otherwise = do
+      failedMatchLbl <- fresh
+      afterAlt <- fresh
+      expr' <- compile expr
+      refutPat' <- compile (refutPat, failedMatchLbl, exprTy)
+      alt' <- compile alt
+      return
+        $  expr'
+        ++ [Hir.Dup :# "We may need a copy of `expr` to project from after discr. test"]
+        ++ refutPat'
+        ++ [Hir.Pop :# "Exiting `let-else` alternative, pop extra copy of `expr`"]
+        ++ [Hir.Jmp afterAlt :# "Jump past the `let-else` alternative"]
+        ++ [Hir.Label failedMatchLbl :# "Begin `let-else` alternative"]
+        ++ [Hir.Pop :# "Entering `let-else` alternative, pop extra copy of `expr`"]
+        ++ alt'
+        ++ [Hir.Label afterAlt :# "End `let-else` alternative"]
 
   compile (Ast.AssignF var expr@(_ :<: NoAliasPat exprTy) :<: ty) = do
     expr' <- compile expr

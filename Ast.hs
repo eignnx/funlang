@@ -55,6 +55,7 @@ data ExprF r
   | CallF r [r]
   | IntrinsicF Parsec.SourcePos String [r]
   | LetF Pat r
+  | LetElseF RefutPat r (Seq r)
   | AssignF String r
   | LetConstF String r
   | RetF r
@@ -250,6 +251,7 @@ instance IsEndTerminated (ExprF f) where
   isEndTerminated (WhileF _ _) = True
   isEndTerminated (LoopF _) = True
   isEndTerminated (BlockF _) = True
+  isEndTerminated (LetElseF {}) = True
   isEndTerminated _ = False
 
 data Typed a = a `HasTy` Ty.Ty
@@ -282,6 +284,7 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (CallF f args) = show f ++ "[" ++ intercalate ", " (map show args) ++ "]"
   show (IntrinsicF pos name args) = "intr." ++ name ++ show args
   show (LetF pat e) = "let" +++ show pat +++ "=" +++ show e
+  show (LetElseF pat e alt) = "let" +++ show pat +++ "=" +++ show e +++ "else" +++ indent (show alt) +++ "end"
   show (AssignF name e) = name +++ "=" +++ show e
   show (LetConstF name e) = "let const" +++ name +++ "=" +++ show e
   show (RetF e) = "ret" +++ show e

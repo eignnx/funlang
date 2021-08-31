@@ -278,6 +278,14 @@ instance CheckType Ast.Expr where
     where
       badPat pat = "The declaration of" +++ code pat +++ "doesn't type check"
 
+  infer (Ast.LetElseF refutPat expr alt :@: loc) = do
+    expr'@(_ :<: NoAliasPat exprTy) <- infer expr
+    refutPat' <- check refutPat exprTy
+    (alt', altTy) <- check alt NeverTy `withErrMsg` badAlt
+    return $ Ast.LetElseF refutPat' expr' alt' :<: unsafeToNoAlias VoidTy
+    where
+      badAlt = "The alternative of a `let-else` expression must have type" +++ code NeverTy
+
   infer (Ast.AssignF name expr :@: loc) = do
     varTy <- varLookup name `withErrMsg` badLookup name
     expr'@(_ :<: NoAliasPat exprTy) <- check expr varTy `withErrMsg` badVarTy expr name
@@ -502,7 +510,8 @@ instance CheckType Ast.Expr where
       reducer Nothing _ = return Nothing
     retTyMaybe <- foldM reducer (Just ty) armBodyTys
 
-    retTy <- lift $ unsafeToNoAlias . (scrutTy -&&>) <$> (retTyMaybe `toRes` RootCause badJoin)
+    retTyAliased <- lift $ (scrutTy -&&>) <$> (retTyMaybe `toRes` RootCause badJoin)
+    retTy <- toNoAlias retTyAliased
 
     -- TODO: perform exhaustiveness/usefulness checking here.
     
