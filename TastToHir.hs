@@ -268,7 +268,9 @@ instance Compile Ast.TypedExpr where
     -- NOTE: you gotta reverse these args below!
     return $ y' ++ x' ++ op'
 
-  compile (Ast.RetF expr :<: ty) = compile expr
+  compile (Ast.RetF expr :<: ty) = do
+    expr' <- compile expr
+    return $ expr' ++ [Hir.Ret]
 
   compile (Ast.IntrinsicF pos name args :<: ty) = do
     args' <- mapM compile args
