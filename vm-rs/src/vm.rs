@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    io::{self, Write},
-};
+use std::collections::HashMap;
 
 use crate::instr::{Ident, Instr, InstrAddr, Intrinsic, Value};
 
@@ -177,17 +174,8 @@ impl Vm {
 
         if debug {
             eprintln!("--------------------");
-            eprintln!("instr {} = {:?}", self.pc, instr);
             eprintln!("stack = {:?}", self.stack);
-
-            eprint!(">>> ");
-            io::stdout().flush().unwrap();
-            let mut buf = String::new();
-            io::stdin().read_line(&mut buf).unwrap();
-            if buf.to_uppercase().trim() == "Q" {
-                self.running = false;
-                eprintln!("EXITING...");
-            }
+            eprintln!("instr {} = {:?}", self.pc, instr);
         }
 
         match instr {
@@ -316,12 +304,14 @@ impl Vm {
                 self.push(Value::VPtr(buf_start));
             }
 
+            // Pops.
             Instr::MemReadDirect(offset) => {
                 let buf_start = self.pop_ptr();
                 let val = heap.mem[buf_start + offset].clone();
                 self.push(val);
             }
 
+            // Pops.
             Instr::TestDiscr(discr) => {
                 let ptr = self.pop_ptr();
                 match &heap.mem[ptr] {
