@@ -19,6 +19,7 @@ import Text.Parsec.Pos ( SourcePos, sourceName, sourceLine, sourceColumn )
 (+++) :: String -> String -> String
 a +++ b
   | "\n" `isSuffixOf` a = a ++ b
+  | b == "" = a
   | otherwise = a ++ " " ++ b
 
 code :: Show a => a -> String
