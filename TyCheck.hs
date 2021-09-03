@@ -61,9 +61,8 @@ instance CheckType Ast.Pat where
 
   check pat@(Ast.TuplePat ps) (TupleTy ts)
     | length ps == length ts = do
-      let pairs = zip ps ts
-      ps <- mapA (uncurry check) pairs
-      return $ Ast.TuplePat ps
+      ps' <- mapA (uncurry check) (zip ps ts)
+      return $ Ast.TuplePat ps'
     | otherwise = fail $ "The pattern" +++ code pat +++ "can't be bound to a tuple that has" +++ show (length ts) +++ "elements"
 
   check pat@(Ast.TuplePat ps) nonTupleTy =
@@ -72,6 +71,8 @@ instance CheckType Ast.Pat where
 instance CheckType Ast.RefutPat where
   type Checked Ast.RefutPat = Ast.RefutPat
 
+  -- Inference only happens when the scrutinee of a match (or expression in let-else) has
+  -- type `Never`.
   infer (Ast.VrntRefutPat name params) = do
     params' <- forA params infer
     return $ Ast.VrntRefutPat name params'
@@ -90,6 +91,12 @@ instance CheckType Ast.RefutPat where
     return $ Ast.VrntRefutPat name params'
     where
       badName = "I don't know what" +++ codeIdent name +++ "refers to in the pattern" +++ code pat
+
+  check pat@(Ast.TupleRefutPat ps) (TupleTy ts)
+    | length ps == length ts = do
+      ps' <- mapA (uncurry check) (zip ps ts)
+      return $ Ast.TupleRefutPat ps'
+    | otherwise = fail $ "The pattern" +++ code pat +++ "can't be bound to a tuple that has" +++ show (length ts) +++ "elements"
 
 instance CheckType (Ast.Seq Ast.Expr) where
 

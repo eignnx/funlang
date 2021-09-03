@@ -18,7 +18,7 @@ import           Hir                          ( Instr((:#)) )
 import           Cata                         ( RecTyped(..) )
 import qualified Comptime
 import qualified Intr
-import Utils ( (+++), codeIdent, optList, braces )
+import Utils ( (+++), codeIdent, optList, braces, code )
 
 import           Control.Monad.State
 import           Data.Foldable
@@ -156,12 +156,13 @@ instance Compile (Ast.RefutPat, Hir.Lbl, NoAliasTy) where
           Ty.FnTy params ret -> Ty.FnTy (map go params) (go ret)
           atomic -> atomic
 
-    (Ast.VrntRefutPat name params, next, NoAliasPat (Ty.VrntTy vrnts)) -> do
+    (pat@(Ast.VrntRefutPat name params), next, NoAliasPat (Ty.VrntTy vrnts)) -> do
       let Just paramTys = map Tcx.unsafeToNoAlias <$> M.lookup name vrnts
 
       -- Test the discriminant, if test fails, go to to next match arm.
       discr <- genDiscriminant name paramTys
-      let testDiscr = [Hir.TestDiscr discr :# ("Discriminant for" +++ braces (name ++ "/" ++ show (length paramTys)))]
+      let testDiscr = [ Hir.Dup :# "Need a copy for discriminant test"
+                      , Hir.TestDiscr discr :# ("Discriminant for" +++ braces (name ++ "/" ++ show (length paramTys)))]
       let jmpIfFalse = [Hir.JmpIfFalse next :# "Jmp to next match arm if test fails"]
 
       -- Compile all the sub-patterns
@@ -169,13 +170,26 @@ instance Compile (Ast.RefutPat, Hir.Lbl, NoAliasTy) where
         refutPat' <- compile (refutPat, next, patTy)
         return
           $ (Hir.Dup :# "We need a copy of local scrutinee from which to project")
-          : (Hir.MemReadDirect idx :# ("Project the" +++ show (idx-1) ++ "th variant field"))
+          : (Hir.MemReadDirect idx :# ("Project the" +++ show (idx-1) ++ "th variant field of" +++ code pat))
           : refutPat'
 
       return
         $  testDiscr
         ++ jmpIfFalse
         ++ concat subPats
+
+    (pat@(Ast.TupleRefutPat ps), next, NoAliasPat (Ty.TupleTy ts)) -> do
+      -- For every sub-pattern (except the last one), we'll need a copy of the TOS.
+      let dups = replicate (length ps - 1) (Hir.Dup :# "Make a copy of scrutinee for all but the last tuple field")
+
+      -- Before the i-th sub-pattern, add `MemReadDirect i`.
+      ps' <- forM (zip3 ps [0..] ts) $ \(subpat, idx, ty) -> do
+        subpat' <- compile (subpat, next, unsafeToNoAlias ty)
+        return
+          $ Hir.MemReadDirect idx :# ("Project the" +++ show idx ++ "th tuple field of" +++ code pat)
+          : subpat'
+
+      return $ dups ++ concat ps'
 
 instance Compile Ast.TypedExpr where
 
@@ -237,7 +251,7 @@ instance Compile Ast.TypedExpr where
           writes :: [[Hir.Instr]] -> [Hir.Instr]
           writes es = concat $ zipWith addWrite es [0..]
           addWrite :: [Hir.Instr] -> Int -> [Hir.Instr]
-          addWrite hir idx = hir ++ [Hir.MemWriteDirect idx :# ("Initialize the" +++ show idx ++ "th tuple field")]
+          addWrite hir idx = hir ++ [Hir.MemWriteDirect idx :# ("Initialize the" +++ show idx ++ "th tuple field of" +++ code lit)]
 
       Ast.Vrnt name args -> do
         let argTys = map (\(_ :<: ty) -> ty) args
@@ -254,7 +268,7 @@ instance Compile Ast.TypedExpr where
           writes :: [[Hir.Instr]] -> [Hir.Instr]
           writes es = concat $ zipWith addWrite es [1..]
           addWrite :: [Hir.Instr] -> Int -> [Hir.Instr]
-          addWrite hir idx = hir ++ [Hir.MemWriteDirect idx :# ("Initialize the" +++ show (idx-1) ++ "th variant field")]
+          addWrite hir idx = hir ++ [Hir.MemWriteDirect idx :# ("Initialize the" +++ show (idx-1) ++ "th variant field of" +++ code lit)]
 
   compile (Ast.UnaryF op expr :<: ty) = do
     expr' <- compile expr

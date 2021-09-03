@@ -232,7 +232,8 @@ pat =  (Ast.VarPat <$> identifier)
 
 refutPat :: Parser Ast.RefutPat
 refutPat =  (Ast.VarRefutPat <$> identifier)
-        <|> vrntRefutPat
+        <|> try vrntRefutPat
+        <|> (Ast.TupleRefutPat <$> braces (sepEndBy refutPat comma))
         <?> "refutable pattern"
 
 vrntRefutPat :: Parser Ast.RefutPat

@@ -1,10 +1,12 @@
-{# ===HIR===; CallDirect (Lbl 1) 0 :# "Call main"; Intrinsic Exit :# "Upon return from main, exit"
+{# ===HIR===
+  CallDirect (Lbl 1) 0 :# "Call main"
+  Intrinsic Exit :# "Upon return from main, exit"
 Label (Lbl 1) :# "Start of def main"
   Alloc 2 :# "Allocate an 2-tuple"
   Const (VInt 123)
   MemWriteDirect 0 :# "Initialize the 0th tuple field of `{ (123 :<: $Int), ({ :Some[({ (456 :<: $Int), (\"blerg\" :<: $Text) } :<: Tuple[$Int, $Text])] } :<: { :Some Tuple[$Int, $Text] }) }`"
   Alloc 2 :# "Allocate variant that has 1 fields"
-  Const (VInt 0) :# "Discriminant for { :Some/1 }"        
+  Const (VInt 0) :# "Discriminant for { :Some/1 }"
   MemWriteDirect 0
   Alloc 2 :# "Allocate an 2-tuple"
   Const (VInt 456)
@@ -16,18 +18,19 @@ Label (Lbl 1) :# "Start of def main"
   Store "scrut"
   Load "scrut"
   Dup :# "We may need a copy of `expr` to project from after discr. test"
-  Dup :# "Make a copy of scrutinee for all but the last tuple field"     
-  MemReadDirect 0 :# "Project the 0th tuple field of `x`"
+  Dup :# "Make a copy of scrutinee for all but the last tuple field"
+  MemReadDirect 0 :# "Project the 0th tuple field of `{ x, { :Some { y, z } } }`"     
   Store "x"
-  MemReadDirect 1 :# "Project the 1th tuple field of `{ :Some { y, z } }`"
+  MemReadDirect 1 :# "Project the 1th tuple field of `{ x, { :Some { y, z } } }`"
+  Dup :# "Need a copy for discriminant test"
   TestDiscr 0 :# "Discriminant for { :Some/1 }"
   JmpIfFalse (Lbl 2) :# "Jmp to next match arm if test fails"
   Dup :# "We need a copy of local scrutinee from which to project"
   MemReadDirect 1 :# "Project the 0th variant field of `{ :Some { y, z } }`"
   Dup :# "Make a copy of scrutinee for all but the last tuple field"
-  MemReadDirect 0 :# "Project the 0th tuple field of `y`"
+  MemReadDirect 0 :# "Project the 0th tuple field of `{ y, z }`"
   Store "y"
-  MemReadDirect 1 :# "Project the 1th tuple field of `z`"
+  MemReadDirect 1 :# "Project the 1th tuple field of `{ y, z }`"
   Store "z"
   Pop :# "Exiting `let-else` alternative, pop extra copy of `expr`"
   Jmp (Lbl 3) :# "Jump past the `let-else` alternative"
@@ -55,9 +58,7 @@ end
 
 def main[] do
   let scrut = { 123, { :Some { 456, "blerg" } } };
-  # let scrut = { :Some { 456, "blerg" } };
   let { x, { :Some { y, z } } } = scrut else
-  # let { :Some { y, z } } = scrut else
     intr.puts["Got :None, not :Some!"];
     intr.exit[];
   end
@@ -65,8 +66,4 @@ def main[] do
   intr.dbg_int[x];
   intr.dbg_int[y];
   intr.dbg_text[z];
-  # match scrut as Tuple[Int, PairOpt]
-  #   | { x, { :None } } => intr.puts["None."]
-  #   | { x, { :Some { y, z } } } => intr.puts["Got it!"]
-  # end
 end

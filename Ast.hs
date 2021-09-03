@@ -137,11 +137,13 @@ instance Show Pat where
 data RefutPat
   = VarRefutPat String
   | VrntRefutPat String [RefutPat]
+  | TupleRefutPat [RefutPat]
 
 instance Show RefutPat where
   show = \case
     VarRefutPat x -> x
     VrntRefutPat name args -> braces $ name +++ intercalate ", " (map show args)
+    TupleRefutPat ps -> braces $ commaSep (map show ps)
 
 data BinOp
   = ArithOp ArithOp

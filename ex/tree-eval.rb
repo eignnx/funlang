@@ -24,23 +24,19 @@ def eval[ctx: Ctx, expr: Expr] -> Tuple[Ctx, Val] do
     | { :Num x } => { ctx, { :Num x } }
     | { :Bool x } => { ctx, { :Bool x } }
     | { :Add x, y } =>
-        let { ctx, x } = eval[ctx, x];
-        let { ctx, y } = eval[ctx, y];
-        let { :Num x } = x else
+        let { ctx, { :Num x } } = eval[ctx, x] else
           type_error["The `+` operator requires numbers!"];
         end
-        let { :Num y } = y else
+        let { ctx, { :Num y } } = eval[ctx, y] else
           type_error["The `+` operator requires numbers!"];
         end
         { ctx, { :Num x + y } }
     | { :Mul x, y } =>
-        let { ctx, x } = eval[ctx, x];
-        let { ctx, y } = eval[ctx, y];
-        let { :Num x } = x else
-          type_error["The `*` operator requires numbers!"];
+        let { ctx, { :Num x } } = eval[ctx, x] else
+          type_error["The `+` operator requires numbers!"];
         end
-        let { :Num y } = y else
-          type_error["The `*` operator requires numbers!"];
+        let { ctx, { :Num y } } = eval[ctx, y] else
+          type_error["The `+` operator requires numbers!"];
         end
         { ctx, { :Num x * y } }
     | { :If cond, yes, no } =>
@@ -91,7 +87,9 @@ def main[] do
   let ctx = { :Empty };
   let expr =
     { :Let "x", { :Num 123 },
-      { :Add { :Mul { :Num 2 }, { :Num 3 } }, { :Var "x" } } };
+      { :If { :Bool true},
+        { :Add { :Mul { :Num 2 }, { :Num 3 } }, { :Var "x" } },
+        { :Mul { :Num 5 } } } };
   let { ctx, result } = eval[ctx, expr];
   print_val[result];
 end

@@ -177,6 +177,7 @@ impl Vm {
 
         if debug {
             eprintln!("--------------------");
+            eprintln!("heap = {:?}", heap);
             eprintln!("stack = {:?}", self.stack);
             eprintln!("instr {} = {:?}", self.pc, instr);
         }
@@ -386,7 +387,7 @@ impl Vm {
                 eprintln!("[Type ENTER to continue, `q` to quit.] ");
                 let mut buf = String::new();
                 stdin().lock().read_line(&mut buf).unwrap();
-                if buf.to_ascii_uppercase() == "Q" {
+                if buf.to_ascii_uppercase().trim() == "Q" {
                     break;
                 }
             }
