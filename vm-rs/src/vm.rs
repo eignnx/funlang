@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    io::{stdin, BufRead},
+};
 
 use crate::instr::{Ident, Instr, InstrAddr, Intrinsic, Value};
 
@@ -378,6 +381,15 @@ impl Vm {
         while self.running {
             self.step(code, &mut heap, debug);
             self.incr_pc();
+
+            if debug {
+                eprintln!("[Type ENTER to continue, `q` to quit.] ");
+                let mut buf = String::new();
+                stdin().lock().read_line(&mut buf).unwrap();
+                if buf.to_ascii_uppercase() == "Q" {
+                    break;
+                }
+            }
         }
     }
 }

@@ -1,8 +1,6 @@
-#![feature(vec_spare_capacity, maybe_uninit_extra)]
-
-use std::io::{BufRead, BufReader};
+use std::fs;
+use std::io::BufReader;
 use std::path::PathBuf;
-use std::{fs, io};
 use structopt::StructOpt;
 
 mod instr;
@@ -13,8 +11,8 @@ use vm::Vm;
 
 #[derive(Debug, StructOpt)]
 struct Opts {
-    #[structopt(name = "FILE", parse(from_os_str))]
-    file_name: Option<PathBuf>,
+    #[structopt(name = "BYTE_CODE_FILE", parse(from_os_str))]
+    bc_file_path: PathBuf,
 
     #[structopt(short = "T", long = "trace-vm")]
     debug: bool,
@@ -22,12 +20,8 @@ struct Opts {
 
 fn main() {
     let opts = Opts::from_args();
-    let reader: Box<dyn BufRead> = match opts.file_name {
-        Some(file_name) => Box::new(BufReader::new(
-            fs::File::open(file_name).expect("file doesnt exist"),
-        )),
-        None => Box::new(BufReader::new(io::stdin())),
-    };
+    let bc_file = fs::File::open(opts.bc_file_path).unwrap();
+    let reader = BufReader::new(bc_file);
     let m = Mod::new(reader);
     let mut vm = Vm::new();
     vm.exec(&m.instrs, opts.debug);

@@ -1,5 +1,6 @@
 {-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE BlockArguments #-}
 
 module Main where
 
@@ -15,13 +16,15 @@ import qualified Vm
 
 import           System.Exit                    ( exitWith, ExitCode(..) )
 import           System.Environment             ( getArgs )
-import           System.Process                 ( createProcess, proc, CreateProcess(..), StdStream(CreatePipe), waitForProcess )
+import           System.Process                 ( createProcess, proc, CreateProcess(..), StdStream(CreatePipe, Inherit, UseHandle, NoStream), waitForProcess, createPipe )
 import           System.FilePath                ( (</>) )
 import           Data.List                      ( find, isPrefixOf, stripPrefix )
 import           Control.Monad                  ( when, forM_ )
 import           Text.Printf                    ( printf )
-import System.IO (hPutStr, hClose, hPutStrLn)
+import System.IO (hPutStr, hClose, hPutStrLn, IOMode (ReadMode, WriteMode))
 import Hir (Instr((:#)))
+import GHC.IO.Handle.FD (openFile)
+import System.Win32 (createFile)
 
 data VmImpl = Hs | Rs
   deriving (Show, Eq)
@@ -62,7 +65,7 @@ getOpts = do
                     , traceCompilation = traceCompilation
                     , traceVm = traceVm
                     , vmImpl = vmImpl
-                    } 
+                    }
 
 main :: IO ()
 main = do
@@ -118,14 +121,24 @@ execVmProgram opts lir | vmImpl opts == Hs = do
   return ()
 
 execVmProgram opts lir | vmImpl opts == Rs = do
-  let trace = if traceVm opts then ["--", "--trace-vm"] else []
-  let cmd = proc "cargo" $ "run" : trace
-  (Just pipe, _, _, h) <- createProcess cmd { cwd = Just ("." </> "vm-rs"), std_in = CreatePipe }
-  forM_ (zip lir [0..]) $ \(instr, idx) ->
-    hPutStrLn pipe $ show idx ++ ": " ++ show instr
-  hClose pipe
+  let bcFileName = filename opts ++ ".bc"
+  writeByteCodeToTmpFile lir bcFileName
+  runRustSubprocess opts bcFileName
+
+runRustSubprocess opts bcFileName = do
+  let releaseArg = ["--release"]
+  let traceArg = ["--trace-vm" | traceVm opts]
+  let exe = "." </> "vm-rs" </> "target" </> "release" </> "vm-rs.exe"
+  let cmd = proc exe $ bcFileName : traceArg
+  (_, _, _, h) <- createProcess cmd
   waitForProcess h
   return ()
+
+writeByteCodeToTmpFile lir bcFileName = do
+  bcFile <- openFile bcFileName WriteMode
+  forM_ (zip lir [0..]) $ \(instr, idx) ->
+    hPutStrLn bcFile $ show idx ++ ": " ++ show instr
+  hClose bcFile
 
 showAssoc assoc = unlines $ ["{"] ++ pairs ++ ["}"]
   where
@@ -133,10 +146,10 @@ showAssoc assoc = unlines $ ["{"] ++ pairs ++ ["}"]
     formatter (key, val) = "\t" ++ show key ++ " = " ++ show val
 
 printAst :: Ast.Expr -> IO ()
-printAst ast = print ast
+printAst = print
 
 printTypedAst :: Ast.TypedExpr -> IO ()
-printTypedAst tast = print tast
+printTypedAst = print
 
 printHir :: [Hir.Instr] -> IO ()
 printHir hir = putStrLn $ unlines $ map f hir
