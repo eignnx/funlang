@@ -21,10 +21,8 @@ import           System.FilePath                ( (</>) )
 import           Data.List                      ( find, isPrefixOf, stripPrefix )
 import           Control.Monad                  ( when, forM_ )
 import           Text.Printf                    ( printf )
-import System.IO (hPutStr, hClose, hPutStrLn, IOMode (ReadMode, WriteMode))
+import System.IO (hPutStr, hClose, hPutStrLn, IOMode (ReadMode, WriteMode), openFile)
 import Hir (Instr((:#)))
-import GHC.IO.Handle.FD (openFile)
-import System.Win32 (createFile)
 
 data VmImpl = Hs | Rs
   deriving (Show, Eq)

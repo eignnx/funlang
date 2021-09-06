@@ -4,3 +4,5 @@
 *.bc
 /ignore/**
 **/target/**
+.stack-work/
+*~
