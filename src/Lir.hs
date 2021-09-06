@@ -1,27 +1,27 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Lir
-  ( InstrAddr(..)
-  , Value(..)
-  , dbgValue
-  , Instr(..)
+  ( InstrAddr (..),
+    Value (..),
+    dbgValue,
+    Instr (..),
   )
 where
 
 import qualified Hir
 import qualified Intr
-import           Utils ( (+++) )
+import Utils ((+++))
 
 newtype InstrAddr = InstrAddr Int
   deriving (Eq, Ord)
-  
+
 instance Show InstrAddr where
   show (InstrAddr x) = show x
 
 instance Num InstrAddr where
   (InstrAddr x) + (InstrAddr y) = InstrAddr (x + y)
   (InstrAddr x) * (InstrAddr y) = InstrAddr (x * y)
-  negate (InstrAddr x) = InstrAddr (-x)
+  negate (InstrAddr x) = InstrAddr (- x)
   abs (InstrAddr x) = InstrAddr (abs x)
   signum (InstrAddr x) = InstrAddr (signum x)
   fromInteger x = InstrAddr $ fromInteger x
@@ -35,9 +35,10 @@ data Value
   deriving (Show, Eq)
 
 dbgValue :: Value -> IO ()
-dbgValue (VInt    x) = print x
-dbgValue (VBool   x) = print x
+dbgValue (VInt x) = print x
+dbgValue (VBool x) = print x
 dbgValue (VText x) = print x
+dbgValue _ = undefined
 
 data Instr
   = Load String

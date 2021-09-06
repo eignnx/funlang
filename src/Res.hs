@@ -1,15 +1,15 @@
 module Res
-  ( Res(..)
-  , Error(..)
-  , toRes
-  , addError
-  , ensureM
+  ( Res (..),
+    Error (..),
+    toRes,
+    addError,
+    ensureM,
   )
 where
 
-import Control.Applicative (Applicative(liftA2))
-import Utils (indent, (+++), code)
-import Control.Monad.Trans (MonadTrans(lift))
+import Control.Applicative (Applicative (liftA2))
+import Control.Monad.Trans (MonadTrans (lift))
+import Utils (code, indent, (+++))
 
 data Res a
   = Ok a

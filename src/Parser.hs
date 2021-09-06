@@ -2,97 +2,112 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Parser
-  ( parseString
-  , parseSrc
-  , parseFile
+  ( parseString,
+    parseSrc,
+    parseFile,
   )
 where
 
 import qualified Ast
-import qualified Ty
-import           Utils                ( Span(..), mkSpan )
-import           Cata                 ( At(..) )
-import           Control.Monad
-import           System.IO
-import           Text.Parsec
-import           Text.Parsec.String
-import           Text.Parsec.Expr
-import           Text.Parsec.Language
-import qualified Text.Parsec.Token    as Token
-import           Debug.Trace          ( trace )
-import qualified Data.Char            as Char
-import           System.FilePath      ( takeBaseName )
-import qualified Data.Functor.Identity
+import Cata (At (..))
+import Control.Monad
+import qualified Data.Char as Char
 import Data.Functor (($>))
+import qualified Data.Functor.Identity
+import Debug.Trace (trace)
+import System.FilePath (takeBaseName)
+import System.IO
+import Text.Parsec
+import Text.Parsec.Expr
+import Text.Parsec.Language
+import Text.Parsec.String
+import qualified Text.Parsec.Token as Token
+import qualified Ty
+import Utils (Span (..), mkSpan)
 
-languageDef = emptyDef
-  { Token.commentStart    = "{#"
-  , Token.commentEnd      = "#}"
-  , Token.commentLine     = "#"
-  , Token.nestedComments  = True
-  , Token.identStart      = letter
-  , Token.identLetter     = alphaNum <|> oneOf "_"
-  , Token.reservedNames   = [ "mod"
-                            , "type"
-                            , "rec"
-                            , "def"
-                            , "let"
-                            , "const"
-                            , "if"
-                            , "then"
-                            , "else"
-                            , "match"
-                            , "while"
-                            , "loop"
-                            , "do"
-                            , "end"
-                            , "intr"
-                            , "nop"
-                            , "true"
-                            , "false"
-                            , "ret"
-                            , "not"
-                            , "and"
-                            , "or"
-                            , "xor"
-                            , "as"
-                            ]
-  , Token.opStart         = oneOf "+-*/=<>!^?&|"
-  , Token.opLetter        = oneOf "+-*/=<>!$@%^?&|"
-  , Token.reservedOpNames = [ "+"
-                            , "-"
-                            , "*"
-                            , "/"
-                            , "=" -- assignment
-                            , "<"
-                            , ">"
-                            -- , "=="
-                            -- , "!="
-                            , "++"
-                            , "->"
-                            , "=>"
-                            , "|"
-                            ]
-  }
+languageDef =
+  emptyDef
+    { Token.commentStart = "{#",
+      Token.commentEnd = "#}",
+      Token.commentLine = "#",
+      Token.nestedComments = True,
+      Token.identStart = letter,
+      Token.identLetter = alphaNum <|> oneOf "_",
+      Token.reservedNames =
+        [ "mod",
+          "type",
+          "rec",
+          "def",
+          "let",
+          "const",
+          "if",
+          "then",
+          "else",
+          "match",
+          "while",
+          "loop",
+          "do",
+          "end",
+          "intr",
+          "nop",
+          "true",
+          "false",
+          "ret",
+          "not",
+          "and",
+          "or",
+          "xor",
+          "as"
+        ],
+      Token.opStart = oneOf "+-*/=<>!^?&|",
+      Token.opLetter = oneOf "+-*/=<>!$@%^?&|",
+      Token.reservedOpNames =
+        [ "+",
+          "-",
+          "*",
+          "/",
+          "=", -- assignment
+          "<",
+          ">",
+          -- , "=="
+          -- , "!="
+          "++",
+          "->",
+          "=>",
+          "|"
+        ]
+    }
 
 lexer = Token.makeTokenParser languageDef
 
 reserved = Token.reserved lexer
+
 reservedOp = Token.reservedOp lexer
 
 parens = Token.parens lexer
+
 brackets = Token.brackets lexer
+
 braces = Token.braces lexer
+
 integer = Token.integer lexer
+
 natural = Token.natural lexer
+
 stringLiteral = Token.stringLiteral lexer
+
 identifier = Token.identifier lexer
 
 symbol = Token.symbol lexer
+
 whiteSpace = Token.whiteSpace lexer
+
 dot = Token.dot lexer
+
 semi = Token.semi lexer
+
 comma = Token.comma lexer
+
 colon = Token.colon lexer
 
 -- Statements
@@ -133,8 +148,9 @@ tyCmpntDef = vrntDef <|> subTyDef
       components <- sepEndBy maybeRecTy comma
       return $ Ast.VrntDef (':' : name) components
     subTyDef = Ast.SubTyDef <$> identifier
-    maybeRecTy =  try (Ast.NonRecTy <$> ty)
-              <|> reserved "rec" $> Ast.Rec
+    maybeRecTy =
+      try (Ast.NonRecTy <$> ty)
+        <|> reserved "rec" $> Ast.Rec
 
 -- ```
 -- def my_fn[arg1, arg2, ...] do
@@ -148,23 +164,30 @@ tyCmpntDef = vrntDef <|> subTyDef
 defExpr :: Parser Ast.Expr
 defExpr = spanned do
   reserved "def"
-  name       <- identifier
-  let param  =  (,) <$> identifier <*> (colon *> ty)
-  params     <- brackets $ sepEndBy param (symbol ",")
-  let exprTail = (do reservedOp "="
-                     body <- expression
-                     return $ Ast.DefF name params Nothing body)
-  let blockTail = (do retTy <- option Ty.VoidTy (reservedOp "->" *> ty) -- Without a ret ty, def defaults to returning Unit.
-                      body  <- blockExpr
-                      return $ Ast.DefF name params (Just retTy) body)
+  name <- identifier
+  let param = (,) <$> identifier <*> (colon *> ty)
+  params <- brackets $ sepEndBy param (symbol ",")
+  let exprTail =
+        ( do
+            reservedOp "="
+            body <- expression
+            return $ Ast.DefF name params Nothing body
+        )
+  let blockTail =
+        ( do
+            retTy <- option Ty.VoidTy (reservedOp "->" *> ty) -- Without a ret ty, def defaults to returning Unit.
+            body <- blockExpr
+            return $ Ast.DefF name params (Just retTy) body
+        )
   exprTail <|> blockTail
 
 ty :: Parser Ty.Ty
-ty =  try (Ty.TupleTy <$> (symbol "Tuple" *> brackets (sepEndBy ty comma)))
-  <|> (Ty.AliasTy <$> (reserved "rec" *> identifier))
-  <|> (Ty.AliasTy <$> identifier)
-  <|> (Ty.FnTy <$> brackets (sepEndBy ty comma) <*> (reservedOp "->" *> ty))
-  <?> "type"
+ty =
+  try (Ty.TupleTy <$> (symbol "Tuple" *> brackets (sepEndBy ty comma)))
+    <|> (Ty.AliasTy <$> (reserved "rec" *> identifier))
+    <|> (Ty.AliasTy <$> identifier)
+    <|> (Ty.FnTy <$> brackets (sepEndBy ty comma) <*> (reservedOp "->" *> ty))
+    <?> "type"
 
 ifExpr :: Parser Ast.Expr
 ifExpr = spanned do
@@ -226,15 +249,17 @@ returnExpr = spanned $ Ast.RetF <$> (reserved "ret" *> expression)
 
 -- Parse a pattern.
 pat :: Parser Ast.Pat
-pat =  (Ast.VarPat <$> identifier)
-   <|> (Ast.TuplePat <$> braces (sepEndBy pat comma))
-   <?> "irrefutable pattern"
+pat =
+  (Ast.VarPat <$> identifier)
+    <|> (Ast.TuplePat <$> braces (sepEndBy pat comma))
+    <?> "irrefutable pattern"
 
 refutPat :: Parser Ast.RefutPat
-refutPat =  (Ast.VarRefutPat <$> identifier)
-        <|> try vrntRefutPat
-        <|> (Ast.TupleRefutPat <$> braces (sepEndBy refutPat comma))
-        <?> "refutable pattern"
+refutPat =
+  (Ast.VarRefutPat <$> identifier)
+    <|> try vrntRefutPat
+    <|> (Ast.TupleRefutPat <$> braces (sepEndBy refutPat comma))
+    <?> "refutable pattern"
 
 vrntRefutPat :: Parser Ast.RefutPat
 vrntRefutPat = braces do
@@ -257,24 +282,24 @@ binaryOp op f = do
 
 operators :: [[Operator String () Data.Functor.Identity.Identity Ast.Expr]]
 operators =
-  [ [ Prefix  (unaryOp (reservedOp "-") (Ast.UnaryF Ast.Neg))
-    , Prefix  (unaryOp (reserved "not") (Ast.UnaryF Ast.Not))
-    ]
-  , [ Infix (binaryOp (reservedOp "*") (Ast.BinaryF (Ast.ArithOp Ast.Mul))) AssocLeft
-    , Infix (binaryOp (reservedOp "/") (Ast.BinaryF (Ast.ArithOp Ast.Div))) AssocLeft
-    ]
-  , [ Infix (binaryOp (reservedOp "+")  (Ast.BinaryF (Ast.ArithOp Ast.Add)))    AssocLeft
-    , Infix (binaryOp (reservedOp "-")  (Ast.BinaryF (Ast.ArithOp Ast.Sub)))    AssocLeft
-    , Infix (binaryOp (reservedOp "++") (Ast.BinaryF (Ast.OtherOp Ast.Concat))) AssocLeft
-    ]
-  , [ Infix (binaryOp (reservedOp ">")  (Ast.BinaryF (Ast.RelOp Ast.Gt)))  AssocLeft
-    , Infix (binaryOp (reservedOp "<")  (Ast.BinaryF (Ast.RelOp Ast.Lt)))  AssocLeft
-    -- , Infix (binaryOp (reservedOp "==") (Ast.BinaryF (Ast.RelOp Ast.Eq)))  AssocLeft
-    -- , Infix (binaryOp (reservedOp "!=") (Ast.BinaryF (Ast.RelOp Ast.Neq))) AssocLeft
-    ]
-  , [ Infix (binaryOp (reserved "and") (Ast.BinaryF (Ast.BoolOp Ast.And))) AssocLeft
-    , Infix (binaryOp (reserved "or")  (Ast.BinaryF (Ast.BoolOp Ast.Or)))  AssocLeft
-    , Infix (binaryOp (reserved "xor") (Ast.BinaryF (Ast.BoolOp Ast.Xor))) AssocLeft
+  [ [ Prefix (unaryOp (reservedOp "-") (Ast.UnaryF Ast.Neg)),
+      Prefix (unaryOp (reserved "not") (Ast.UnaryF Ast.Not))
+    ],
+    [ Infix (binaryOp (reservedOp "*") (Ast.BinaryF (Ast.ArithOp Ast.Mul))) AssocLeft,
+      Infix (binaryOp (reservedOp "/") (Ast.BinaryF (Ast.ArithOp Ast.Div))) AssocLeft
+    ],
+    [ Infix (binaryOp (reservedOp "+") (Ast.BinaryF (Ast.ArithOp Ast.Add))) AssocLeft,
+      Infix (binaryOp (reservedOp "-") (Ast.BinaryF (Ast.ArithOp Ast.Sub))) AssocLeft,
+      Infix (binaryOp (reservedOp "++") (Ast.BinaryF (Ast.OtherOp Ast.Concat))) AssocLeft
+    ],
+    [ Infix (binaryOp (reservedOp ">") (Ast.BinaryF (Ast.RelOp Ast.Gt))) AssocLeft,
+      Infix (binaryOp (reservedOp "<") (Ast.BinaryF (Ast.RelOp Ast.Lt))) AssocLeft
+      -- , Infix (binaryOp (reservedOp "==") (Ast.BinaryF (Ast.RelOp Ast.Eq)))  AssocLeft
+      -- , Infix (binaryOp (reservedOp "!=") (Ast.BinaryF (Ast.RelOp Ast.Neq))) AssocLeft
+    ],
+    [ Infix (binaryOp (reserved "and") (Ast.BinaryF (Ast.BoolOp Ast.And))) AssocLeft,
+      Infix (binaryOp (reserved "or") (Ast.BinaryF (Ast.BoolOp Ast.Or))) AssocLeft,
+      Infix (binaryOp (reserved "xor") (Ast.BinaryF (Ast.BoolOp Ast.Xor))) AssocLeft
     ]
   ]
 
@@ -282,7 +307,8 @@ operators =
 -- That's why we gotta split things up into `termFirst`
 -- and `term`.
 term :: Parser Ast.Expr
-term =  try nestedCalls
+term =
+  try nestedCalls
     <|> try nestedAnn
     <|> try nestedProj
     <|> termFirst
@@ -325,29 +351,31 @@ literalExpr :: Parser Ast.Expr
 literalExpr = spanned $ Ast.LiteralF <$> literal
 
 termFirst :: Parser Ast.Expr
-termFirst =  semiEndedTerm <|> endEndedTerm
+termFirst = semiEndedTerm <|> endEndedTerm
 
-semiEndedTerm =  intrinsicExpr
-             <|> parens expression
-             <|> nopExpr
-             <|> returnExpr
-             <|> try letConstExpr
-             <|> letExpr
-             <|> literalExpr
-             <|> try assignExpr
-             <|> varExpr
-             <?> "term that ends with `;`"
+semiEndedTerm =
+  intrinsicExpr
+    <|> parens expression
+    <|> nopExpr
+    <|> returnExpr
+    <|> try letConstExpr
+    <|> letExpr
+    <|> literalExpr
+    <|> try assignExpr
+    <|> varExpr
+    <?> "term that ends with `;`"
 
-endEndedTerm =  blockExpr
-            <|> ifExpr
-            <|> matchExpr
-            <|> whileExpr
-            <|> loopExpr
-            <|> letElseExpr
-            <|> defExpr
-            <|> modExpr
-            <|> tyDefExpr
-            <?> "term that ends with `end`"
+endEndedTerm =
+  blockExpr
+    <|> ifExpr
+    <|> matchExpr
+    <|> whileExpr
+    <|> loopExpr
+    <|> letElseExpr
+    <|> defExpr
+    <|> modExpr
+    <|> tyDefExpr
+    <?> "term that ends with `end`"
 
 endEndedExpr = endEndedTerm
 
@@ -374,34 +402,35 @@ arguments :: Parser [Ast.Expr]
 arguments = brackets $ sepEndBy expression comma
 
 literal :: Parser (Ast.Lit Ast.Expr)
-literal =  (Ast.Int <$> integer)
-       <|> (Ast.Bool <$> boolean)
-       <|> (Ast.Text <$> stringLiteral)
-       <|> try (Ast.Tuple <$> tuple)
-       <|> vrnt
-       <?> "literal"
- where
-  boolean =  (reserved "true" >> return True)
-         <|> (reserved "false" >> return False)
-  tuple = braces $ sepEndBy expression comma
-  vrnt = braces do
-    colon
-    name <- identifier
-    args <- sepEndBy expression comma
-    return $ Ast.Vrnt (':' : name) args
-
+literal =
+  (Ast.Int <$> integer)
+    <|> (Ast.Bool <$> boolean)
+    <|> (Ast.Text <$> stringLiteral)
+    <|> try (Ast.Tuple <$> tuple)
+    <|> vrnt
+    <?> "literal"
+  where
+    boolean =
+      (reserved "true" >> return True)
+        <|> (reserved "false" >> return False)
+    tuple = braces $ sepEndBy expression comma
+    vrnt = braces do
+      colon
+      name <- identifier
+      args <- sepEndBy expression comma
+      return $ Ast.Vrnt (':' : name) args
 
 seqTerminatedBy :: Parser a -> Parser (Ast.Seq Ast.Expr)
-seqTerminatedBy end
+seqTerminatedBy end =
   -- First case: terminatedExpr IMMEDIATELY FOLLOWED BY end, should be put in
   -- `Ast.Result`, NOT `Ast.Semi _ Ast.End`. This allows `if` exprs to appear
   -- at the end of a block and return their result without looking like they
   -- return `Void`.
-  =   try (Ast.Result <$> (terminatedExpr <* lookAhead end))
-  <|> try (Ast.Semi <$> terminatedExpr <*> seqTerminatedBy end)
-  <|> (Ast.Result <$> (expression <* lookAhead end))
-  <|> (lookAhead end *> return Ast.Empty)
-  <?> "sequence of expressions"
+  try (Ast.Result <$> (terminatedExpr <* lookAhead end))
+    <|> try (Ast.Semi <$> terminatedExpr <*> seqTerminatedBy end)
+    <|> (Ast.Result <$> (expression <* lookAhead end))
+    <|> (lookAhead end $> Ast.Empty)
+    <?> "sequence of expressions"
 
 blockExpr :: Parser Ast.Expr
 blockExpr = spanned do
@@ -417,10 +446,11 @@ parseString = parseSrc "<string input>"
 parseSrc :: String -> String -> IO Ast.Expr
 parseSrc fileName src = do
   case parse langParser fileName src of
-    Left  e -> print e >> fail "parse error"
+    Left e -> print e >> fail "parse error"
     Right (Ast.ModF _ items :@: loc) -> do
       let modName = modNameFromFileName fileName
       return $ Ast.ModF modName items :@: loc
+    Right _ -> undefined
 
 parseFile :: String -> IO Ast.Expr
 parseFile fileName = do
@@ -432,15 +462,18 @@ modNameFromFileName fileName = camelCase $ splitName $ takeBaseName fileName
 
 splitName :: String -> [String]
 splitName = go ""
-  where go acc = \case
-            "" -> [acc]
-            c : cs
-              | c `elem` ['-', '_'] -> acc : go "" cs
-              | otherwise -> go (acc ++ [c]) cs
+  where
+    go acc = \case
+      "" -> [acc]
+      c : cs
+        | c `elem` ['-', '_'] -> acc : go "" cs
+        | otherwise -> go (acc ++ [c]) cs
 
 camelCase :: [String] -> String
 camelCase = concatMap capitalize
-  where capitalize (c:cs) = Char.toUpper c : cs
+  where
+    capitalize (c : cs) = Char.toUpper c : cs
+    capitalize [] = undefined
 
 spanned :: Parser (Ast.ExprF (At Ast.ExprF)) -> Parser (At Ast.ExprF)
 spanned p = do

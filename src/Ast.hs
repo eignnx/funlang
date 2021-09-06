@@ -1,45 +1,45 @@
-{-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Ast
-  ( ExprF(..)
-  , itemName
-  , isModLevelItem
-  , modLevelItemTy
-  , TyCmpntDef(..)
-  , IsRec(..)
-  , MaybeRecTy(..)
-  , Pat(..)
-  , RefutPat(..)
-  , Seq(..)
-  , BinOp(..)
-  , ArithOp(..)
-  , BoolOp(..)
-  , RelOp(..)
-  , OtherOp(..)
-  , Lit(..)
-  , UnaryOp(..)
-  , Expr
-  , isEndTerminated
-  , Typed(..)
-  , TypedExpr
+  ( ExprF (..),
+    itemName,
+    isModLevelItem,
+    modLevelItemTy,
+    TyCmpntDef (..),
+    IsRec (..),
+    MaybeRecTy (..),
+    Pat (..),
+    RefutPat (..),
+    Seq (..),
+    BinOp (..),
+    ArithOp (..),
+    BoolOp (..),
+    RelOp (..),
+    OtherOp (..),
+    Lit (..),
+    UnaryOp (..),
+    Expr,
+    isEndTerminated,
+    Typed (..),
+    TypedExpr,
   )
 where
 
-import qualified Ty
-import           Cata                              ( At(..), RecTyped(..), Unwrap(..), cata )
-import           Utils                             ( (+++), code, indent, commaSep, braces, optList )
-
-import qualified Text.ParserCombinators.Parsec.Pos as Parsec
-import           Data.List                         ( intercalate, isSuffixOf )
-import qualified Data.Map                          as M
+import Cata (At (..), RecTyped (..), Unwrap (unwrap))
+import Data.List (intercalate, isSuffixOf)
+import qualified Data.Map as M
 import qualified Data.Maybe
 import Tcx (NoAliasTy (getNoAlias), toNoAlias, unsafeToNoAlias)
+import qualified Text.ParserCombinators.Parsec.Pos as Parsec
+import qualified Ty
+import Utils (braces, code, commaSep, indent, optList, (+++))
 
 -- This type used to be called `Expr` (see [this commit](1)), but was rewritten
 -- to use an F-Algebra (I think that's right?), and backwards-compatible
@@ -68,44 +68,42 @@ data ExprF r
   | DefF String [(String, Ty.Ty)] (Maybe Ty.Ty) r
   | ModF String [r]
   | TyDefF IsRec String [TyCmpntDef]
-  deriving Functor
+  deriving (Functor)
 
 type Expr = At ExprF
 
 itemName :: ExprF r -> Maybe String
 itemName = \case
-  DefF name _ _ _   -> Just name
-  ModF name _       -> Just name
-  LetConstF name _  -> Just name
-  TyDefF _ name _   -> Just name
-  _                 -> Nothing
+  DefF name _ _ _ -> Just name
+  ModF name _ -> Just name
+  LetConstF name _ -> Just name
+  TyDefF _ name _ -> Just name
+  _ -> Nothing
 
 isModLevelItem :: ExprF r -> Bool
 isModLevelItem = \case
-  DefF {}       -> True
-  ModF _ _      -> True
+  DefF {} -> True
+  ModF _ _ -> True
   LetConstF _ _ -> True
-  TyDefF {}     -> True
-  _             -> False
+  TyDefF {} -> True
+  _ -> False
 
 modLevelItemTy :: TypedExpr -> Ty.Ty
 modLevelItemTy = \case
-
   DefF _ params Nothing (_ :<: bodyTy) :<: _ ->
     Ty.FnTy (map snd params) $ getNoAlias bodyTy
-
   DefF _ params (Just retTy) _ :<: _ ->
     Ty.FnTy (map snd params) retTy
-
   ModF _ items :<: _ -> Ty.ModTy $ M.fromList pairs
-    where getItemName (item :<: _) = Data.Maybe.fromMaybe (error "") $ itemName item
-          pairs = zip (map getItemName items) (map modLevelItemTy items)
+    where
+      getItemName (item :<: _) = Data.Maybe.fromMaybe (error "") $ itemName item
+      pairs = zip (map getItemName items) (map modLevelItemTy items)
 
   -- Just return the type of `e` in `static x = e`.
   LetConstF _ (exprF :<: ty) :<: _ -> getNoAlias ty
-
   TyDefF NotRec name _ :<: _ -> Ty.AliasTy name
-  TyDefF IsRec  name _ :<: _ -> Ty.RecTy ("?" ++ name) (Ty.AliasTy name)
+  TyDefF IsRec name _ :<: _ -> Ty.RecTy ("?" ++ name) (Ty.AliasTy name)
+  _ -> undefined
 
 data TyCmpntDef
   = VrntDef String [MaybeRecTy]
@@ -119,10 +117,10 @@ instance Show TyCmpntDef where
 data MaybeRecTy
   = NonRecTy Ty.Ty
   | Rec
-  deriving Show
+  deriving (Show)
 
 data IsRec = IsRec | NotRec
-  deriving Show
+  deriving (Show)
 
 -- Represents a pattern.
 data Pat
@@ -181,7 +179,7 @@ data Lit e
   | Unit
   | Tuple [e]
   | Vrnt String [e]
-  deriving Functor
+  deriving (Functor)
 
 instance Show e => Show (Lit e) where
   show = \case
@@ -222,13 +220,13 @@ instance Show UnaryOp where
 --   ```
 --  translates to: `Semi g[] (Semi g[] Empty)`.
 --  The block `do end` translates to: `Empty`.
-data Seq e         -- <sequence> -->
-  = Empty          --            | lookahead{END}
-  | Result e       --            | <expr> lookahead{END}
+data Seq e -- <sequence> -->
+  = Empty --            | lookahead{END}
+  | Result e --            | <expr> lookahead{END}
   | Semi e (Seq e) --            | <expr> SEMICOLON <sequence>
-  deriving Functor
+  deriving (Functor)
 
-instance (IsEndTerminated e, Show e) => Show (Seq e)  where
+instance (IsEndTerminated e, Show e) => Show (Seq e) where
   show = \case
     Empty -> ""
     Result e -> show e
@@ -249,11 +247,11 @@ instance IsEndTerminated TypedExpr where
   isEndTerminated e = isEndTerminated $ unwrap e
 
 instance IsEndTerminated (ExprF f) where
-  isEndTerminated (IfF {}) = True
+  isEndTerminated IfF {} = True
   isEndTerminated (WhileF _ _) = True
   isEndTerminated (LoopF _) = True
   isEndTerminated (BlockF _) = True
-  isEndTerminated (LetElseF {}) = True
+  isEndTerminated LetElseF {} = True
   isEndTerminated _ = False
 
 data Typed a = a `HasTy` Ty.Ty
@@ -262,7 +260,8 @@ type TypedExpr = RecTyped ExprF
 
 showParams :: [(String, Ty.Ty)] -> String
 showParams params = intercalate ", " $ map pairFmt params
-  where pairFmt (param, ty) = param ++ ": " ++ show ty
+  where
+    pairFmt (param, ty) = param ++ ": " ++ show ty
 
 instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) where
   show (VarF name) = name
@@ -271,15 +270,15 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (UnaryF Neg x) = "-(" ++ show x ++ ")"
   show (UnaryF (TupleProj idx) x) = show x ++ "." ++ show idx
   show (BinaryF op x y) = case op of
-    ArithOp Add    -> show x +++ "+" +++ show y
-    ArithOp Sub    -> show x +++ "-" +++ show y
-    ArithOp Mul    -> show x +++ "*" +++ show y
-    ArithOp Div    -> show x +++ "/" +++ show y
-    BoolOp And     -> show x +++ "and" +++ show y
-    BoolOp Or      -> show x +++ "or" +++ show y
-    BoolOp Xor     -> show x +++ "xor" +++ show y
-    RelOp Gt       -> show x +++ ">" +++ show y
-    RelOp Lt       -> show x +++ "<" +++ show y
+    ArithOp Add -> show x +++ "+" +++ show y
+    ArithOp Sub -> show x +++ "-" +++ show y
+    ArithOp Mul -> show x +++ "*" +++ show y
+    ArithOp Div -> show x +++ "/" +++ show y
+    BoolOp And -> show x +++ "and" +++ show y
+    BoolOp Or -> show x +++ "or" +++ show y
+    BoolOp Xor -> show x +++ "xor" +++ show y
+    RelOp Gt -> show x +++ ">" +++ show y
+    RelOp Lt -> show x +++ "<" +++ show y
     OtherOp Concat -> show x +++ "++" +++ show y
   show (BlockF Empty) = "do end"
   show (BlockF seq) = "do" ++ indent (show seq) ++ "\nend"
@@ -291,7 +290,7 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
   show (LetConstF name e) = "let const" +++ name +++ "=" +++ show e
   show (RetF e) = "ret" +++ show e
   show (IfF cond yes no) = "if" +++ show cond +++ "then" ++ indent (show yes) ++ "\nelse" ++ indent (show no) ++ "\nend"
-  show (MatchF scrut arms) = "match" +++ show scrut ++ indent (concatMap ((++"\n") . ("|"+++) . (\(pat, seq) -> show pat +++ "=>" +++ show seq)) arms) ++ "end"
+  show (MatchF scrut arms) = "match" +++ show scrut ++ indent (concatMap ((++ "\n") . ("|" +++) . (\(pat, seq) -> show pat +++ "=>" +++ show seq)) arms) ++ "end"
   show (WhileF cond body) = "while" +++ show cond +++ show body
   show (LoopF body) = "loop" +++ show body
   show NopF = "nop"
@@ -302,9 +301,9 @@ instance (Show (f ExprF), IsEndTerminated (f ExprF)) => Show (ExprF (f ExprF)) w
     "def" +++ name ++ "[" ++ showParams paramsAndTys ++ "] =" +++ indent (show body)
   show (ModF name items) =
     "mod" +++ name ++ indent (intercalate "\n\n" (map show items)) ++ "\nend"
-  show (TyDefF isRec name ctorDefs) = let
-    recness = case isRec of IsRec -> "rec "; NotRec -> ""
-    in "type" +++ recness ++ name ++ indent (intercalate "\n" (map (("|"+++) . show) ctorDefs)) ++ "\nend"
+  show (TyDefF isRec name ctorDefs) =
+    let recness = case isRec of IsRec -> "rec "; NotRec -> ""
+     in "type" +++ recness ++ name ++ indent (intercalate "\n" (map (("|" +++) . show) ctorDefs)) ++ "\nend"
 
 instance Show TypedExpr where
   show (e :<: t) = "(" ++ show e +++ ":<:" +++ show t ++ ")"

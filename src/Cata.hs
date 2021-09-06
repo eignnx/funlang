@@ -1,16 +1,16 @@
 module Cata
-  ( Algebra
-  , Unwrap(..)
-  , cata
-  , Fix(..)
-  , At(..)
-  , RecTyped(..)
+  ( Algebra,
+    Unwrap (..),
+    cata,
+    Fix (..),
+    At (..),
+    RecTyped (..),
   )
 where
 
-import qualified Ty
-import Utils ( Span(..) )
 import Tcx (NoAliasTy)
+import qualified Ty
+import Utils (Span (..))
 
 type Algebra f a = f a -> a
 
@@ -22,7 +22,7 @@ class Unwrap y where
 cata :: (Functor f, Unwrap y) => Algebra f a -> y f -> a
 cata alg = alg . fmap (cata alg) . unwrap
 
-data Fix f = Fix (f (Fix f))
+newtype Fix f = Fix (f (Fix f))
 
 instance Unwrap Fix where
   unwrap (Fix f) = f

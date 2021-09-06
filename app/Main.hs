@@ -1,39 +1,33 @@
-{-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE MagicHash #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE NamedFieldPuns #-}
 
 module Main where
 
 import qualified Ast
-import qualified Parser
+import Control.Monad (forM_, when)
+import Data.List (find, isPrefixOf, stripPrefix)
+import Hir (Instr ((:#)))
 import qualified Hir
-import qualified TyCheck
-import qualified Res
-import qualified TastToHir
 import qualified Lir
+import qualified Parser
+import qualified Res
+import System.Environment (getArgs)
+import System.Exit (ExitCode (..), exitWith)
+import System.FilePath ((</>))
+import System.IO (IOMode (WriteMode), hClose, hPutStrLn, openFile)
+import System.Process (createProcess, proc, waitForProcess)
+import qualified TastToHir
+import Text.Printf (printf)
 import qualified ToLir
-import qualified Vm
+import qualified TyCheck
 
-import           System.Exit                    ( exitWith, ExitCode(..) )
-import           System.Environment             ( getArgs )
-import           System.Process                 ( createProcess, proc, CreateProcess(..), StdStream(CreatePipe, Inherit, UseHandle, NoStream), waitForProcess, createPipe )
-import           System.FilePath                ( (</>) )
-import           Data.List                      ( find, isPrefixOf, stripPrefix )
-import           Control.Monad                  ( when, forM_ )
-import           Text.Printf                    ( printf )
-import System.IO (hPutStr, hClose, hPutStrLn, IOMode (ReadMode, WriteMode), openFile)
-import Hir (Instr((:#)))
-
-data VmImpl = Hs | Rs
-  deriving (Show, Eq)
-
-data Opts
-  = Opts { filename         :: String
-         , traceCompilation :: Bool
-         , traceVm          :: Bool
-         , vmImpl           :: VmImpl
-         }
-  deriving Show
+data Opts = Opts
+  { filename :: String,
+    traceCompilation :: Bool,
+    traceVm :: Bool
+  }
+  deriving (Show)
 
 hasFlag :: [String] -> (String, String) -> Bool
 flags `hasFlag` (short, long) = short `elem` flags || long `elem` flags
@@ -51,27 +45,26 @@ getOpts = do
   case args of
     [] -> error "Please provide the path to a source file!"
     (filename : flags) -> do
-      let traceCompilation =  flags `hasSubFlag` ("-T", "c", "--trace-compilation")
-                           || flags `hasFlag` ("-T", "--trace-all")
-      let traceVm =  flags `hasSubFlag` ("-T", "v", "--trace-vm")
-                  || flags `hasFlag` ("-T", "--trace-all")
-      let vmImpl = case () of
-                        () | flags `hasSubFlag` ("-M", "-h", "--haskell-vm") -> Hs
-                           | flags `hasSubFlag` ("-M", "-r", "--rust-vm") -> Rs
-                           | otherwise -> Rs
-      return $ Opts { filename = filename
-                    , traceCompilation = traceCompilation
-                    , traceVm = traceVm
-                    , vmImpl = vmImpl
-                    }
+      let traceCompilation =
+            flags `hasSubFlag` ("-T", "c", "--trace-compilation")
+              || flags `hasFlag` ("-T", "--trace-all")
+      let traceVm =
+            flags `hasSubFlag` ("-T", "v", "--trace-vm")
+              || flags `hasFlag` ("-T", "--trace-all")
+      return $
+        Opts
+          { filename = filename,
+            traceCompilation = traceCompilation,
+            traceVm = traceVm
+          }
 
 main :: IO ()
 main = do
   opts <- getOpts
-  ast  <- parseFile opts
+  ast <- parseFile opts
   tast <- astToTypedAst opts ast
-  hir  <- tastToHir opts tast
-  lir  <- hirToLir opts hir
+  hir <- tastToHir opts tast
+  lir <- hirToLir opts hir
   execVmProgram opts lir
 
 parseFile :: Opts -> IO Ast.Expr
@@ -94,7 +87,6 @@ astToTypedAst opts ast = do
       putStrLn $ "\n===COMPILATION ERROR===\n" ++ show err ++ "\n======================="
       exitWith (ExitFailure 1)
 
-
 tastToHir :: Opts -> Ast.TypedExpr -> IO [Hir.Instr]
 tastToHir opts tast = do
   let hir = TastToHir.astToHir tast
@@ -112,13 +104,7 @@ hirToLir opts hir = do
   return lir
 
 execVmProgram :: Opts -> [Lir.Instr] -> IO ()
-execVmProgram opts lir | vmImpl opts == Hs = do
-  finalState <- if traceVm opts
-    then Vm.debugExecVmProgram lir
-    else Vm.execVmProgram lir
-  return ()
-
-execVmProgram opts lir | vmImpl opts == Rs = do
+execVmProgram opts lir = do
   let bcFileName = filename opts ++ ".bc"
   writeByteCodeToTmpFile lir bcFileName
   runRustSubprocess opts bcFileName
@@ -134,7 +120,7 @@ runRustSubprocess opts bcFileName = do
 
 writeByteCodeToTmpFile lir bcFileName = do
   bcFile <- openFile bcFileName WriteMode
-  forM_ (zip lir [0..]) $ \(instr, idx) ->
+  forM_ (zip lir [0 ..]) $ \(instr, idx) ->
     hPutStrLn bcFile $ show idx ++ ": " ++ show instr
   hClose bcFile
 
@@ -157,22 +143,7 @@ printHir hir = putStrLn $ unlines $ map f hir
     f instr = "  " ++ show instr
 
 printLir :: [Lir.Instr] -> IO ()
-printLir lir = putStrLn $ unlines $ zipWith fmt [0..] lir
+printLir lir = putStrLn $ unlines $ zipWith fmt [0 ..] lir
   where
     fmt :: Int -> Lir.Instr -> String
     fmt i instr = printf "%3d: %s" i (show instr)
-
-compileAndRun :: Ast.Expr -> IO ()
-compileAndRun ast = do
-  let tast      = case TyCheck.astToTypedAst ast of
-                       Res.Ok tast -> tast
-                       Res.Err err -> error $ show err
-  let hirInstrs = TastToHir.astToHir tast
-  let lirInstrs = ToLir.hirToLir hirInstrs
-  Vm.execVmProgram lirInstrs
-  return ()
-
-runProgram :: String -> IO ()
-runProgram src = do
-  ast <- Parser.parseString src
-  compileAndRun ast

@@ -2,42 +2,42 @@
 {-# LANGUAGE TupleSections #-}
 
 module Tcx
-  ( Tcx(..)
-  , TyChecker(..)
-  , initTcx
-  , (<:)
-  , (-&&>)
-  , (>||<)
-  , inNewScope
-  , define
-  , setFnRetTy
-  , varLookup
-  , getFnRetTy
-  , defineTyAlias
-  , resolveAsVrnts
-  , resolveAliasAsVrnts
-  , NoAliasTy(..)
-  , toNoAlias
-  , unsafeToNoAlias
-  , mapA
-  , forA
-  , pairA
-  , withErrMsg
+  ( Tcx (..),
+    TyChecker (..),
+    initTcx,
+    (<:),
+    (-&&>),
+    (>||<),
+    inNewScope,
+    define,
+    setFnRetTy,
+    varLookup,
+    getFnRetTy,
+    defineTyAlias,
+    resolveAsVrnts,
+    resolveAliasAsVrnts,
+    NoAliasTy (..),
+    toNoAlias,
+    unsafeToNoAlias,
+    mapA,
+    forA,
+    pairA,
+    withErrMsg,
   )
 where
 
-import Ty (Ty(..))
-import qualified Data.Map as M
-import Control.Monad.State (MonadState(get, put), gets, modify, lift, StateT (runStateT), State, withState, withStateT)
-import Res (Res (Ok, Err), Error (RootCause), toRes, addError)
-import Utils (code, (+++), codeIdent)
+import Control.Monad (filterM, foldM, forM, join, liftM)
+import Control.Monad.State (MonadState (get, put), State, StateT (runStateT), gets, lift, modify, withState, withStateT)
+import Data.Foldable (Foldable (fold, toList))
 import Data.List (find)
-import Control.Monad (foldM, forM, join, liftM, filterM)
-import Data.Monoid (All(All, getAll))
-import GHC.Base (Functor)
+import qualified Data.Map as M
 import Data.Maybe (fromJust, isJust)
+import Data.Monoid (All (All, getAll))
 import Debug.Trace (trace, traceM)
-import Data.Foldable (Foldable(fold, toList))
+import GHC.Base (Functor)
+import Res (Error (RootCause), Res (Err, Ok), addError, toRes)
+import Ty (Ty (..))
+import Utils (code, codeIdent, (+++))
 
 type Tcx = [TcxElem]
 
@@ -56,81 +56,72 @@ tcxLookupVar needle = \case
   _ : tcx -> tcxLookupVar needle tcx
 
 initTcx :: Tcx
-initTcx = [ AliasBind "Never" NeverTy
-          , AliasBind "Void" VoidTy
-          , AliasBind "Bool" BoolTy
-          , AliasBind "Int" IntTy
-          , AliasBind "Text" TextTy
-          ]
+initTcx =
+  [ AliasBind "Never" NeverTy,
+    AliasBind "Void" VoidTy,
+    AliasBind "Bool" BoolTy,
+    AliasBind "Int" IntTy,
+    AliasBind "Text" TextTy
+  ]
 
 type TyChecker = StateT Tcx Res
 
 (<:) :: Ty -> Ty -> TyChecker Bool
 NeverTy <: t2 = return True
-
 t1 <: t2 | t1 == t2 = return True
-
 ValTy n1 <: ValTy n2 = return $ n1 == n2
-
 AliasTy name <: ty = do
   resolved <- resolveAlias name
   resolved <: ty
-
 ty <: AliasTy name = do
   resolved <- resolveAlias name
   ty <: resolved
-
 VrntTy vs1 <: VrntTy vs2 = do
   isSubmapOfM ctorSubtype vs1 vs2
-  where ctorSubtype ts1 ts2 = TupleTy ts1 <: TupleTy ts2
-
+  where
+    ctorSubtype ts1 ts2 = TupleTy ts1 <: TupleTy ts2
 TupleTy ts1 <: TupleTy ts2 = do
   foldM allSubtypes True (zip ts1 ts2)
-  where allSubtypes True (t1, t2) = t1 <: t2
-        allSubtypes False _ = return False
-
+  where
+    allSubtypes True (t1, t2) = t1 <: t2
+    allSubtypes False _ = return False
 FnTy xs1 y1 <: FnTy xs2 y2 = do
   xRes <- foldM allSupertypes True (zip xs1 xs2)
   yRes <- y1 <: y2
   return $ xRes && yRes
-  where allSupertypes True (x1, x2) = x2 <: x1
-        allSupertypes False _ = return False
-
+  where
+    allSupertypes True (x1, x2) = x2 <: x1
+    allSupertypes False _ = return False
 ModTy m1 <: ModTy m2 = return $ m2 `M.isSubmapOf` m1
-
 r1@(RecTy x1 t1) <: r2@(RecTy x2 t2) = do
   modify $ \tcx -> TyVarBind x1 r1 : TyVarBind x2 r2 : tcx
   t1 <: t2
-
 r@(RecTy x body) <: ty = do
   modify $ \tcx -> TyVarBind x r : tcx
   body <: ty
-
 ty <: r@(RecTy x body) = do
   modify $ \tcx -> TyVarBind x r : tcx
   ty <: body
-
 TyVar x <: ty = do
   repl <- gets (head . concatMap search)
   repl <: ty
   where
     search (TyVarBind x' ty) | x == x' = [ty]
     search _ = []
-
 ty <: TyVar x = do
   repl <- gets (head . concatMap search)
   ty <: repl
   where
     search (TyVarBind x' ty) | x == x' = [ty]
     search _ = []
-
 _ <: _ = return False
 
-isSubmapOfM :: (Ord k, Monad m)
-            => (v -> v -> m Bool)
-            -> M.Map k v
-            -> M.Map k v
-            -> m Bool
+isSubmapOfM ::
+  (Ord k, Monad m) =>
+  (v -> v -> m Bool) ->
+  M.Map k v ->
+  M.Map k v ->
+  m Bool
 isSubmapOfM predM m1 m2 = do
   asdf <- forM (M.toList m1) $ \(k1, v1) ->
     case M.lookup k1 m2 of
@@ -151,15 +142,16 @@ _ -&&> ty = ty
 --   case that `Never >||< ty` or `ty >||< Never` is `ty`. In general, this
 --   operator returns the supertype of its two arguments.
 --   NOTE: It only works if the two types are related via `<:`.
+
 ---  HMMM: Should `Int >||< Text` be `Any`? Probably not.
 (>||<) :: Ty -> Ty -> TyChecker (Maybe Ty)
 a >||< b = do
   aSubB <- a <: b
   bSubA <- b <: a
   case (aSubB, bSubA) of
-    (True, False)  -> return $ Just b
-    (False, True)  -> return $ Just a
-    (True, True)   -> return $ Just a -- `a` and `b` must be equal.
+    (True, False) -> return $ Just b
+    (False, True) -> return $ Just a
+    (True, True) -> return $ Just a -- `a` and `b` must be equal.
     (False, False) -> do
       return Nothing
 
@@ -184,7 +176,8 @@ varLookup name = do
   tcx <- get
   let res = toRes (tcxLookupVar name tcx) reason
   lift res
-    where reason = RootCause ("The variable" +++ codeIdent name +++ "is not declared anywhere.")
+  where
+    reason = RootCause ("The variable" +++ codeIdent name +++ "is not declared anywhere.")
 
 getFnRetTy :: TyChecker Ty
 getFnRetTy = do
@@ -230,7 +223,8 @@ assumeVrnt :: Ty -> Res (M.Map String [Ty])
 assumeVrnt = \case
   VrntTy vrnts -> Ok vrnts
   other -> Err $ RootCause msg
-    where msg = "I was expecting a variant type, but got" +++ code other
+    where
+      msg = "I was expecting a variant type, but got" +++ code other
 
 resolveTyVar :: String -> TyChecker Ty
 resolveTyVar name = do
@@ -242,7 +236,7 @@ resolveTyVar name = do
 
 -- | A Ty that's guarunteed not to have any AliasTy's. All aliases have been resolved out
 --   of the type.
-newtype NoAliasTy = NoAliasPat { getNoAlias :: Ty }
+newtype NoAliasTy = NoAliasPat {getNoAlias :: Ty}
   deriving (Eq, Ord)
 
 instance Show NoAliasTy where
@@ -252,25 +246,23 @@ unsafeToNoAlias :: Ty -> NoAliasTy
 unsafeToNoAlias ty
   | trulyHasNoAliases ty = NoAliasPat ty
   | otherwise = error $ "`unsafeToNoAlias` is unsafe on" +++ code ty
-    where trulyHasNoAliases = \case
-            AliasTy _ -> False
-            ValTy _ -> True
-            VrntTy vrnts -> all trulyHasNoAliases $ concat $ M.elems vrnts
-            TupleTy comps -> all trulyHasNoAliases comps
-            FnTy params ret -> all trulyHasNoAliases params && trulyHasNoAliases ret
-            ModTy m -> all trulyHasNoAliases $ M.elems m
-            RecTy tyVar body -> trulyHasNoAliases body
-            TyVar name -> True
+  where
+    trulyHasNoAliases = \case
+      AliasTy _ -> False
+      ValTy _ -> True
+      VrntTy vrnts -> all trulyHasNoAliases $ concat $ M.elems vrnts
+      TupleTy comps -> all trulyHasNoAliases comps
+      FnTy params ret -> all trulyHasNoAliases params && trulyHasNoAliases ret
+      ModTy m -> all trulyHasNoAliases $ M.elems m
+      RecTy tyVar body -> trulyHasNoAliases body
+      TyVar name -> True
 
 toNoAlias :: Ty -> TyChecker NoAliasTy
 toNoAlias = \case
-
   ValTy name -> return $ unsafeToNoAlias $ ValTy name
-
   AliasTy name -> do
     ty <- resolveAlias name
     toNoAlias ty -- Make sure we recursively remove any aliases from result.
-
   VrntTy vrnts -> do
     vrnts <- forM (M.toList vrnts) $ \(ctorName, ctorParams) -> do
       ctorParams' <- mapM toNoAlias ctorParams
@@ -278,13 +270,11 @@ toNoAlias = \case
       return (ctorName, unwrapped)
     let vrnts' = M.fromList vrnts
     return $ unsafeToNoAlias $ VrntTy vrnts'
-
   TupleTy ts -> do
     ts <- forM ts $ \ty -> do
       ty' <- toNoAlias ty
       return $ getNoAlias ty'
     return $ unsafeToNoAlias $ TupleTy ts
-
   FnTy params ret -> do
     params <- forM params $ \ty -> do
       ty' <- toNoAlias ty
@@ -293,18 +283,15 @@ toNoAlias = \case
     let ret' = getNoAlias retRes
     let fn = FnTy params ret'
     return $ unsafeToNoAlias fn
-
   ModTy m -> do
     mRes <- forM (M.toList m) $ \(name, ty) -> do
       ty' <- toNoAlias ty
       return (name, getNoAlias ty')
     let m' = M.fromList mRes
     return $ unsafeToNoAlias $ ModTy m'
-
   RecTy tyVar body -> do
     bodyRes <- toNoAlias body
     return $ unsafeToNoAlias $ RecTy tyVar $ getNoAlias bodyRes
-
   TyVar name ->
     return $ unsafeToNoAlias $ TyVar name
 
@@ -321,10 +308,10 @@ mapA f as = do
       -- We need to run the rest of the program (beyond the `mapA` call) using
       -- the modified state.
       withStateT (const st) (lift $ sequenceA $ reverse bs)
-    go st bs (a:as) = do
+    go st bs (a : as) = do
       case runStateT (f a) st of
-        Ok (b, st') -> go st' (Ok b:bs) as
-        Err err -> go st (Err err:bs) as -- Use old state here? Sure. Why not.
+        Ok (b, st') -> go st' (Ok b : bs) as
+        Err err -> go st (Err err : bs) as -- Use old state here? Sure. Why not.
 
 forA :: [a] -> (a -> TyChecker b) -> TyChecker [b]
 forA as f = mapA f as
