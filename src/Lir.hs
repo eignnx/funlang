@@ -8,6 +8,8 @@ module Lir
   )
 where
 
+import Control.Monad.Trans (lift)
+import Control.Monad.Writer (MonadWriter (tell), Writer)
 import qualified Hir
 import qualified Intr
 import Utils ((+++))
@@ -34,10 +36,10 @@ data Value
   | VPtr Int
   deriving (Show, Eq)
 
-dbgValue :: Value -> IO ()
-dbgValue (VInt x) = print x
-dbgValue (VBool x) = print x
-dbgValue (VText x) = print x
+dbgValue :: Value -> String
+dbgValue (VInt x) = show x
+dbgValue (VBool x) = show x
+dbgValue (VText x) = show x
 dbgValue _ = undefined
 
 data Instr

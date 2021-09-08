@@ -23,7 +23,7 @@ import Text.Parsec.Language
 import Text.Parsec.String
 import qualified Text.Parsec.Token as Token
 import qualified Ty
-import Utils (Span (..), mkSpan)
+import Utils (Span (..), code, mkSpan, (+++))
 
 languageDef =
   emptyDef
@@ -440,22 +440,22 @@ blockExpr = spanned do
   return $ Ast.BlockF seq
 
 -- REPL Helper Functions
-parseString :: String -> IO Ast.Expr
+parseString :: String -> Ast.Expr
 parseString = parseSrc "<string input>"
 
-parseSrc :: String -> String -> IO Ast.Expr
+parseSrc :: String -> String -> Ast.Expr
 parseSrc fileName src = do
   case parse langParser fileName src of
-    Left e -> print e >> fail "parse error"
-    Right (Ast.ModF _ items :@: loc) -> do
+    Left e -> error $ "Parse Error:" +++ code e
+    Right (Ast.ModF _ items :@: loc) ->
       let modName = modNameFromFileName fileName
-      return $ Ast.ModF modName items :@: loc
+       in Ast.ModF modName items :@: loc
     Right _ -> undefined
 
 parseFile :: String -> IO Ast.Expr
 parseFile fileName = do
   src <- readFile fileName
-  parseSrc fileName src
+  return $ parseSrc fileName src
 
 modNameFromFileName :: String -> String
 modNameFromFileName fileName = camelCase $ splitName $ takeBaseName fileName

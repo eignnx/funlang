@@ -4,7 +4,7 @@
 
 module TastToHir
   ( initialCState,
-    astToHir,
+    tastToHir,
     runCompilation,
   )
 where
@@ -455,7 +455,7 @@ trampoline defs = entryPointJump ++ exit
 joinDefs :: [(String, Hir.Lbl, [Hir.Instr])] -> [Hir.Instr]
 joinDefs = concatMap (\(_, _, hir) -> hir)
 
-astToHir :: Compile a => a -> [Hir.Instr]
-astToHir ast = trampoline defs ++ joinDefs defs
+tastToHir :: Compile a => a -> [Hir.Instr]
+tastToHir ast = trampoline defs ++ joinDefs defs
   where
     (_hir, CState {defs_ = defs}) = runCompilation ast

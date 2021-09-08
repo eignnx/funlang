@@ -4,6 +4,7 @@ module Res
     toRes,
     addError,
     ensureM,
+    unwrapRes
   )
 where
 
@@ -73,3 +74,6 @@ ensureM cond failureMsg program = do
   if bool
     then program
     else fail failureMsg
+
+unwrapRes (Ok a) = a
+unwrapRes (Err e) = error $ show e
