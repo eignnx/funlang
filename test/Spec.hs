@@ -9,6 +9,7 @@
 import Ast
 import Cata (At (..))
 import Control.Monad (filterM, forM, forM_, liftM, liftM2, replicateM)
+import Data.Either (isLeft)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.Set as S
 import GHC.Generics
@@ -62,10 +63,6 @@ prop_xMinusXIs0 (IntExpr expr) = runExpr (dbgInt (expr `minus` expr)) === Right 
 
 minus :: Expr -> Expr -> Expr
 minus x y = at $ BinaryF (ArithOp Sub) x y
-
-isLeft :: Either a b -> Bool
-isLeft (Left _) = True
-isLeft _ = False
 
 prop_letElseMatchEquivalence PatPair {pat, expr, bindings} =
   classify (any isLeft [rhs, lhs]) "Runtime error during execution" $ rhs === lhs
