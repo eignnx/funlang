@@ -4,12 +4,13 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 import Ast
 import Cata (At (..))
 import Control.Monad (filterM, forM, forM_, liftM, liftM2, replicateM)
-import Data.Either (isLeft)
+import Data.Either (isLeft, isRight)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.Set as S
 import GHC.Generics
@@ -21,7 +22,7 @@ import qualified Res
 import System.FilePath ((</>))
 import System.IO (hPrint, hPutStrLn, openTempFileWithDefaultPermissions)
 import qualified TastToHir
-import Test.QuickCheck (Arbitrary (shrink), Gen, NonEmptyList (NonEmpty), NonNegative (NonNegative), arbitrary, choose, chooseInt, classify, discard, elements, forAll, frequency, genericShrink, label, labelledExamples, oneof, resize, sized, vector, vectorOf, verboseCheck, verboseShrinking, withMaxSuccess, (===), (==>))
+import Test.QuickCheck (Arbitrary (shrink), Gen, NonEmptyList (NonEmpty), NonNegative (NonNegative), arbitrary, choose, chooseInt, classify, discard, elements, forAll, frequency, genericShrink, label, labelledExamples, oneof, quickCheckAll, resize, sized, vector, vectorOf, verboseCheck, verboseShrinking, withMaxSuccess, (===), (==>))
 import Test.QuickCheck.Arbitrary (Arbitrary)
 import Test.QuickCheck.Test (quickCheck)
 import qualified TestingVm
@@ -29,11 +30,6 @@ import qualified ToLir
 import Ty
 import qualified TyCheck
 import Utils (Span, mkSpan, (+++))
-
-main :: IO ()
-main = do
-  quickCheck prop_xMinusXIs0
-  quickCheck prop_letElseMatchEquivalence
 
 runVm ast =
   let tast = Res.unwrapRes $ TyCheck.astToTypedAst ast
@@ -67,6 +63,25 @@ minus x y = at $ BinaryF (ArithOp Sub) x y
 labelExeResult = \case
   Right _ -> "Success"
   Left e -> e
+
+prop_simpleMatchHasNoRtErrs PatPair {pat, expr, bindings} = isRight $ runExpr m
+  where
+    m =
+      match expr $
+        [ (pat', [puts "matched!"]),
+          (VarRefutPat "_", [puts "no match!", exit])
+        ]
+    pat' = patToRefutPat pat
+
+prop_simpleLetElseHasNoRtErrs PatPair {pat, expr, bindings} = isRight $ runExpr le
+  where
+    le =
+      block
+        [ letElse pat' expr $
+            [puts "no match!", exit],
+          puts "matched!"
+        ]
+    pat' = patToRefutPat pat
 
 prop_letElseMatchEquivalence PatPair {pat, expr, bindings} =
   label (labelExeResult rhs) $ rhs === lhs
@@ -152,7 +167,9 @@ vars = take 1000 $ zipWith f (cycle ['a' .. 'z']) [0 ..]
     f c n = c : show n
 
 data PatPair = PatPair {pat :: Pat, expr :: Expr, bindings :: S.Set String}
-  deriving (Show)
+
+instance Show PatPair where
+  show PatPair {pat, expr, bindings} = show pat +++ "<~" +++ show expr
 
 instance Arbitrary PatPair where
   arbitrary = sized gen
@@ -176,8 +193,10 @@ instance Arbitrary PatPair where
                   then (p1 : ps, e1 : es, S.union b0 b1)
                   else discard
 
-  shrink p@PatPair {pat = TuplePat [], expr = TupleExpr [], bindings = bs} = [p]
+  shrink p@PatPair {pat = _, expr = TupleExpr [], bindings = bs} = []
   shrink p@PatPair {pat = VarPat _, expr = _, bindings = bs} = [p]
+  shrink p@PatPair {pat = TuplePat [pat], expr = TupleExpr [expr], bindings = bs} =
+    [PatPair {pat, expr, bindings = bs}]
   shrink p@PatPair {pat = TuplePat pats, expr = TupleExpr es, bindings = bs} =
     [PatPair {pat = TuplePat pats', expr = TupleExpr es', bindings = bs} | (pats', es') <- subs]
     where
@@ -266,3 +285,9 @@ instance Arbitrary BinOp where
 
 instance Arbitrary ArithOp where
   arbitrary = oneof $ pure <$> [Add, Sub, Mul]
+
+------------------------------------------------------------------------------------------
+
+return [] -- Template Haskell: Stop here!
+
+main = $quickCheckAll
