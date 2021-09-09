@@ -282,7 +282,7 @@ stepVm instr = do
           Just (Lir.VInt d)
             | d == discr -> push $ Lir.VBool True
             | otherwise -> push $ Lir.VBool False
-          Just x -> raiseErr $ "Expected VInt for discriminant, got" +++ code (Lir.valueKind x)
+          Just x -> raiseErr $ "Expected VInt for discriminant, got" +++ codeIdent (Lir.valueKind x)
           Nothing -> raiseErr "TestDiscr mem read out of bounds"
 
 popPtr :: VmProgram Int
@@ -290,7 +290,7 @@ popPtr = do
   val <- pop
   case val of
     Lir.VPtr ptr -> return ptr
-    x -> raiseErr $ "Expected VPtr, got" +++ code (Lir.valueKind x)
+    x -> raiseErr $ "Expected VPtr, got" +++ codeIdent (Lir.valueKind x)
 
 raiseErr ::
   (Monad (t1 (Either a1)), MonadTrans t2, MonadTrans t1) =>

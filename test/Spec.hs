@@ -60,11 +60,31 @@ prop_xMinusXIs0 (IntExpr expr) = runExpr (dbgInt (expr `minus` expr)) === Right 
 minus :: Expr -> Expr -> Expr
 minus x y = at $ BinaryF (ArithOp Sub) x y
 
-labelExeResult = \case
-  Right _ -> "Success"
-  Left e -> e
+labelExeResult eith rest =
+  case eith of
+    Right _ -> label "Success" rest
+    Left e -> label e rest
 
-prop_simpleMatchHasNoRtErrs PatPair {pat, expr, bindings} = isRight $ runExpr m
+-- | See https://github.com/eignnx/funlang/issues/3
+patHasNoInitialEmptyTuples :: Pat -> Bool
+patHasNoInitialEmptyTuples = \case
+  TuplePat [] -> False
+  TuplePat ps -> all patHasNoInitialEmptyTuples ps
+  VarPat _ -> True
+
+-- | See https://github.com/eignnx/funlang/issues/3
+exprHasNoInitialEmptyTuples :: Expr -> Bool
+exprHasNoInitialEmptyTuples = \case
+  TupleExpr [] -> False
+  TupleExpr es -> all exprHasNoInitialEmptyTuples es
+  _ -> True
+
+-- | See https://github.com/eignnx/funlang/issues/3
+noInitialEmptyTuples pat expr =
+  patHasNoInitialEmptyTuples pat && exprHasNoInitialEmptyTuples expr
+
+prop_simpleMatchHasNoRtErrs PatPair {pat, expr, bindings} =
+  noInitialEmptyTuples pat expr ==> isRight (runExpr m)
   where
     m =
       match expr $
@@ -73,7 +93,8 @@ prop_simpleMatchHasNoRtErrs PatPair {pat, expr, bindings} = isRight $ runExpr m
         ]
     pat' = patToRefutPat pat
 
-prop_simpleLetElseHasNoRtErrs PatPair {pat, expr, bindings} = isRight $ runExpr le
+prop_simpleLetElseHasNoRtErrs PatPair {pat, expr, bindings} =
+  noInitialEmptyTuples pat expr ==> isRight (runExpr le)
   where
     le =
       block
@@ -84,7 +105,9 @@ prop_simpleLetElseHasNoRtErrs PatPair {pat, expr, bindings} = isRight $ runExpr 
     pat' = patToRefutPat pat
 
 prop_letElseMatchEquivalence PatPair {pat, expr, bindings} =
-  label (labelExeResult rhs) $ rhs === lhs
+  labelExeResult rhs $
+    noInitialEmptyTuples pat expr
+      ==> rhs === lhs
   where
     rhs = runExpr m
     lhs = runExpr le
@@ -194,13 +217,15 @@ instance Arbitrary PatPair where
                   else discard
 
   shrink p@PatPair {pat = _, expr = TupleExpr [], bindings = bs} = []
-  shrink p@PatPair {pat = VarPat _, expr = _, bindings = bs} = [p]
+  shrink p@PatPair {pat = VarPat _, expr = _, bindings = bs} = []
   shrink p@PatPair {pat = TuplePat [pat], expr = TupleExpr [expr], bindings = bs} =
     [PatPair {pat, expr, bindings = bs}]
-  shrink p@PatPair {pat = TuplePat pats, expr = TupleExpr es, bindings = bs} =
-    [PatPair {pat = TuplePat pats', expr = TupleExpr es', bindings = bs} | (pats', es') <- subs]
+  shrink p@PatPair {pat = TuplePat pats, expr = TupleExpr es, bindings = bs} = shrunkToVarPat : shrunkToSubPat
     where
+      shrunkToVarPat = PatPair {pat = VarPat v, expr = TupleExpr es, bindings = S.insert v bs}
+      shrunkToSubPat = [PatPair {pat = TuplePat pats', expr = TupleExpr es', bindings = bs} | (pats', es') <- subs]
       subs = map unzip $ init $ powerset $ zip pats es
+      v = head $ filter (`notElem` bs) vars
   shrink _ = undefined
 
 powerset = filterM (const [False, True])
