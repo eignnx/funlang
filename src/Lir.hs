@@ -4,6 +4,7 @@ module Lir
   ( InstrAddr (..),
     Value (..),
     dbgValue,
+    valueKind,
     Instr (..),
   )
 where
@@ -41,6 +42,13 @@ dbgValue (VInt x) = show x
 dbgValue (VBool x) = show x
 dbgValue (VText x) = show x
 dbgValue _ = undefined
+
+valueKind :: Value -> String
+valueKind (VInt _) = "VInt"
+valueKind (VBool _) = "VBool"
+valueKind (VText _) = "VText"
+valueKind (VInstrAddr _) = "VInstrAddr"
+valueKind (VPtr _) = "VPtr"
 
 data Instr
   = Load String

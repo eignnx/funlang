@@ -47,7 +47,7 @@ pop = do
     (top : stack') -> do
       put $ state {stack = stack'}
       return top
-    [] -> raiseErr $ "\n\tVM Stack Underflow!\n\tstate = " ++ show state ++ "\n"
+    [] -> raiseErr "VM Stack Underflow!"
 
 popInt :: VmProgram Int
 popInt = do
@@ -72,7 +72,7 @@ popInstrAddr = do
   val <- pop
   case val of
     Lir.VInstrAddr x -> return x
-    other -> raiseErr $ "Interal Vm Error: Expected VInstrAddr, got: " ++ show other
+    other -> raiseErr $ "Expected VInstrAddr, got: " ++ show (Lir.valueKind other)
 
 push :: Lir.Value -> VmProgram ()
 push value = do
@@ -272,7 +272,7 @@ stepVm instr = do
         bufStart <- popPtr
         h <- gets heap
         case M.lookup (bufStart + offset) h of
-          Nothing -> raiseErr $ "MemReadDirect out of bounds addr:" +++ show (bufStart + offset)
+          Nothing -> raiseErr "MemReadDirect out of bounds"
           Just val -> push val
       -- Pops.
       Lir.TestDiscr discr -> do
@@ -282,14 +282,15 @@ stepVm instr = do
           Just (Lir.VInt d)
             | d == discr -> push $ Lir.VBool True
             | otherwise -> push $ Lir.VBool False
-          x -> raiseErr $ "Expected VInt for discriminant, got" +++ code x
+          Just x -> raiseErr $ "Expected VInt for discriminant, got" +++ code (Lir.valueKind x)
+          Nothing -> raiseErr "TestDiscr mem read out of bounds"
 
 popPtr :: VmProgram Int
 popPtr = do
   val <- pop
   case val of
     Lir.VPtr ptr -> return ptr
-    x -> raiseErr $ "Expected VPtr, got" +++ code x
+    x -> raiseErr $ "Expected VPtr, got" +++ code (Lir.valueKind x)
 
 raiseErr ::
   (Monad (t1 (Either a1)), MonadTrans t2, MonadTrans t1) =>

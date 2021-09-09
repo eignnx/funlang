@@ -64,8 +64,12 @@ prop_xMinusXIs0 (IntExpr expr) = runExpr (dbgInt (expr `minus` expr)) === Right 
 minus :: Expr -> Expr -> Expr
 minus x y = at $ BinaryF (ArithOp Sub) x y
 
+labelExeResult = \case
+  Right _ -> "Success"
+  Left e -> e
+
 prop_letElseMatchEquivalence PatPair {pat, expr, bindings} =
-  classify (any isLeft [rhs, lhs]) "Runtime error during execution" $ rhs === lhs
+  label (labelExeResult rhs) $ rhs === lhs
   where
     rhs = runExpr m
     lhs = runExpr le
