@@ -66,14 +66,13 @@ labelExeResult eith rest =
     Left e -> label e rest
 
 -- | See https://github.com/eignnx/funlang/issues/3
-patHasNoEmptyTuples :: Pat -> Bool
 patHasNoEmptyTuples = \case
-  TuplePat [] -> False
-  TuplePat ps -> all patHasNoEmptyTuples ps
-  VarPat _ -> True
+  TupleRefutPat [] -> False
+  TupleRefutPat ps -> all patHasNoEmptyTuples ps
+  VarRefutPat _ -> True
+  _ -> undefined
 
 -- | See https://github.com/eignnx/funlang/issues/3
-exprHasNoEmptyTuples :: Expr -> Bool
 exprHasNoEmptyTuples = \case
   TupleExpr [] -> False
   TupleExpr es -> all exprHasNoEmptyTuples es
@@ -83,28 +82,26 @@ exprHasNoEmptyTuples = \case
 noEmptyTuples pat expr =
   patHasNoEmptyTuples pat && exprHasNoEmptyTuples expr
 
-prop_simpleMatchHasNoRtErrs PatPair {pat, expr, bindings} =
+prop_simpleMatchHasNoRtErrs (RefutPatPair pat expr bindings) =
   noEmptyTuples pat expr ==> isRight (runExpr m)
   where
     m =
       match expr $
-        [ (pat', [puts "matched!"]),
+        [ (pat, [puts "matched!"]),
           (VarRefutPat "_", [puts "no match!", exit])
         ]
-    pat' = patToRefutPat pat
 
-prop_simpleLetElseHasNoRtErrs PatPair {pat, expr, bindings} =
+prop_simpleLetElseHasNoRtErrs (RefutPatPair pat expr bindings) =
   noEmptyTuples pat expr ==> isRight (runExpr le)
   where
     le =
       block
-        [ letElse pat' expr $
+        [ letElse pat expr $
             [puts "no match!", exit],
           puts "matched!"
         ]
-    pat' = patToRefutPat pat
 
-prop_letElseMatchEquivalence PatPair {pat, expr, bindings} =
+prop_letElseMatchEquivalence (RefutPatPair pat expr bindings) =
   labelExeResult rhs $
     noEmptyTuples pat expr
       ==> rhs === lhs
@@ -113,16 +110,15 @@ prop_letElseMatchEquivalence PatPair {pat, expr, bindings} =
     lhs = runExpr le
     m =
       match expr $
-        [ (pat', [puts "matched!"]),
+        [ (pat, [puts "matched!"]),
           (VarRefutPat "_", [puts "no match!", exit])
         ]
     le =
       block
-        [ letElse pat' expr $
+        [ letElse pat expr $
             [puts "no match!", exit],
           puts "matched!"
         ]
-    pat' = patToRefutPat pat
 
 block :: Foldable t => t Expr -> Expr
 block es = at $ BlockF (mkSeq es)
@@ -134,11 +130,6 @@ exit = intrinsic "exit" []
 
 letElse :: Foldable t => RefutPat -> At ExprF -> t (At ExprF) -> At ExprF
 letElse pat expr alt = at $ LetElseF pat expr (mkSeq alt)
-
-patToRefutPat :: Pat -> RefutPat
-patToRefutPat = \case
-  VarPat x -> VarRefutPat x
-  TuplePat pats -> TupleRefutPat $ map patToRefutPat pats
 
 match :: Foldable t => At ExprF -> [(RefutPat, t (At ExprF))] -> At ExprF
 match expr arms = at $ MatchF expr arms'
@@ -202,25 +193,23 @@ instance Arbitrary PatPair where
         name <- elements vars
         lit <- at . LiteralF <$> arbitrary
         return $ PatPair {pat = VarPat name, expr = lit, bindings = S.singleton name}
-      gen n = tuplePatPair
+      gen n = do
+        len <- chooseInt (0, n)
+        patPairs <- replicateM len (gen (n `div` len))
+        let init = ([], [], S.empty)
+        let (ps, es, bindings) = foldr f init patPairs
+        return $ PatPair {pat = TuplePat ps, expr = TupleExpr es, bindings}
         where
-          tuplePatPair = do
-            len <- chooseInt (0, n)
-            patPairs <- replicateM len (gen (n `div` len))
-            let init = ([], [], S.empty)
-            let (ps, es, bindings) = foldr f init patPairs
-            return $ PatPair {pat = TuplePat ps, expr = TupleExpr es, bindings}
-            where
-              f PatPair {pat = p1, expr = e1, bindings = b1} (ps, es, b0) =
-                if S.null (S.intersection b0 b1) -- Ensure all pattern vars are unique.
-                  then (p1 : ps, e1 : es, S.union b0 b1)
-                  else discard
+          f PatPair {pat = p1, expr = e1, bindings = b1} (ps, es, b0) =
+            if S.null (S.intersection b0 b1) -- Ensure all pattern vars are unique.
+              then (p1 : ps, e1 : es, S.union b0 b1)
+              else discard
 
-  shrink p@PatPair {pat = _, expr = TupleExpr [], bindings = bs} = []
-  shrink p@PatPair {pat = VarPat _, expr = _, bindings = bs} = []
-  shrink p@PatPair {pat = TuplePat [pat], expr = TupleExpr [expr], bindings = bs} =
+  shrink PatPair {pat = _, expr = TupleExpr [], bindings = bs} = []
+  shrink PatPair {pat = VarPat _, expr = _, bindings = bs} = []
+  shrink PatPair {pat = TuplePat [pat], expr = TupleExpr [expr], bindings = bs} =
     [PatPair {pat, expr, bindings = bs}]
-  shrink p@PatPair {pat = TuplePat pats, expr = TupleExpr es, bindings = bs} = shrunkToVarPat : shrunkToSubPat
+  shrink PatPair {pat = TuplePat pats, expr = TupleExpr es, bindings = bs} = shrunkToVarPat : shrunkToSubPat
     where
       shrunkToVarPat = PatPair {pat = VarPat v, expr = TupleExpr es, bindings = S.insert v bs}
       shrunkToSubPat = [PatPair {pat = TuplePat pats', expr = TupleExpr es', bindings = bs} | (pats', es') <- subs]
@@ -229,6 +218,45 @@ instance Arbitrary PatPair where
   shrink _ = undefined
 
 powerset = filterM (const [False, True])
+
+data RefutPatPair = RefutPatPair RefutPat Expr (S.Set String)
+
+instance Show RefutPatPair where
+  show (RefutPatPair pat expr bindings) = show pat +++ "<?~" +++ show expr
+
+instance Arbitrary RefutPatPair where
+  arbitrary = sized gen
+    where
+      gen 0 = emptyTuplePat
+      gen 1 = varPat
+      gen n = tuplePat n
+      tuplePat n = do
+        len <- chooseInt (0, n)
+        patPairs <- replicateM len (gen (n `div` len))
+        let init = ([], [], S.empty)
+        let (ps, es, bindings) = foldr f init patPairs
+        return $ RefutPatPair (TupleRefutPat ps) (TupleExpr es) bindings
+        where
+          f (RefutPatPair p1 e1 b1) (ps, es, b0) =
+            if S.null (S.intersection b0 b1) -- Ensure all pattern vars are unique.
+              then (p1 : ps, e1 : es, S.union b0 b1)
+              else discard
+      emptyTuplePat = return $ RefutPatPair (TupleRefutPat []) (TupleExpr []) S.empty
+      varPat = do
+        name <- elements vars
+        expr <- at . LiteralF <$> arbitrary
+        return $ RefutPatPair (VarRefutPat name) expr (S.singleton name)
+
+  shrink (RefutPatPair _ (TupleExpr []) bs) = []
+  shrink (RefutPatPair (VarRefutPat _) _ bs) = [RefutPatPair (TupleRefutPat []) (TupleExpr []) bs]
+  shrink (RefutPatPair (TupleRefutPat [pat]) (TupleExpr [expr]) bs) = [RefutPatPair pat expr bs]
+  shrink (RefutPatPair (TupleRefutPat pats) (TupleExpr es) bs) = shrunkToVarPat : shrunkToSubPat
+    where
+      shrunkToVarPat = RefutPatPair (VarRefutPat v) (TupleExpr es) (S.insert v bs)
+      v = head $ filter (`notElem` bs) vars
+      shrunkToSubPat = [RefutPatPair (TupleRefutPat pats') (TupleExpr es') bs | (pats', es') <- subs]
+      subs = map unzip $ init $ powerset $ zip pats es
+  shrink _ = undefined
 
 newtype TupleGen = TupleGen Ast.Expr
 
