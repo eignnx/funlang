@@ -66,25 +66,25 @@ labelExeResult eith rest =
     Left e -> label e rest
 
 -- | See https://github.com/eignnx/funlang/issues/3
-patHasNoInitialEmptyTuples :: Pat -> Bool
-patHasNoInitialEmptyTuples = \case
+patHasNoEmptyTuples :: Pat -> Bool
+patHasNoEmptyTuples = \case
   TuplePat [] -> False
-  TuplePat ps -> all patHasNoInitialEmptyTuples ps
+  TuplePat ps -> all patHasNoEmptyTuples ps
   VarPat _ -> True
 
 -- | See https://github.com/eignnx/funlang/issues/3
-exprHasNoInitialEmptyTuples :: Expr -> Bool
-exprHasNoInitialEmptyTuples = \case
+exprHasNoEmptyTuples :: Expr -> Bool
+exprHasNoEmptyTuples = \case
   TupleExpr [] -> False
-  TupleExpr es -> all exprHasNoInitialEmptyTuples es
+  TupleExpr es -> all exprHasNoEmptyTuples es
   _ -> True
 
 -- | See https://github.com/eignnx/funlang/issues/3
-noInitialEmptyTuples pat expr =
-  patHasNoInitialEmptyTuples pat && exprHasNoInitialEmptyTuples expr
+noEmptyTuples pat expr =
+  patHasNoEmptyTuples pat && exprHasNoEmptyTuples expr
 
 prop_simpleMatchHasNoRtErrs PatPair {pat, expr, bindings} =
-  noInitialEmptyTuples pat expr ==> isRight (runExpr m)
+  noEmptyTuples pat expr ==> isRight (runExpr m)
   where
     m =
       match expr $
@@ -94,7 +94,7 @@ prop_simpleMatchHasNoRtErrs PatPair {pat, expr, bindings} =
     pat' = patToRefutPat pat
 
 prop_simpleLetElseHasNoRtErrs PatPair {pat, expr, bindings} =
-  noInitialEmptyTuples pat expr ==> isRight (runExpr le)
+  noEmptyTuples pat expr ==> isRight (runExpr le)
   where
     le =
       block
@@ -106,7 +106,7 @@ prop_simpleLetElseHasNoRtErrs PatPair {pat, expr, bindings} =
 
 prop_letElseMatchEquivalence PatPair {pat, expr, bindings} =
   labelExeResult rhs $
-    noInitialEmptyTuples pat expr
+    noEmptyTuples pat expr
       ==> rhs === lhs
   where
     rhs = runExpr m
