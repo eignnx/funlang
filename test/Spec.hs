@@ -22,7 +22,7 @@ import qualified Res
 import System.FilePath ((</>))
 import System.IO (hPrint, hPutStrLn, openTempFileWithDefaultPermissions)
 import qualified TastToHir
-import Test.QuickCheck (Arbitrary (shrink), Gen, NonEmptyList (NonEmpty), NonNegative (NonNegative), arbitrary, choose, chooseInt, classify, discard, elements, forAll, frequency, genericShrink, label, labelledExamples, oneof, quickCheckAll, resize, sized, vector, vectorOf, verboseCheck, verboseShrinking, withMaxSuccess, (===), (==>))
+import Test.QuickCheck (Arbitrary (shrink), Args (maxShrinks), Gen, NonEmptyList (NonEmpty), NonNegative (NonNegative), arbitrary, choose, chooseInt, classify, discard, elements, forAll, frequency, genericShrink, label, labelledExamples, oneof, quickCheckAll, quickCheckWith, resize, sized, stdArgs, vector, vectorOf, verboseCheck, verboseShrinking, withMaxSuccess, (===), (==>))
 import Test.QuickCheck.Arbitrary (Arbitrary)
 import Test.QuickCheck.Test (quickCheck)
 import qualified TestingVm
@@ -70,12 +70,13 @@ patHasNoEmptyTuples = \case
   TupleRefutPat [] -> False
   TupleRefutPat ps -> all patHasNoEmptyTuples ps
   VarRefutPat _ -> True
-  _ -> undefined
+  VrntRefutPat _ ps -> all patHasNoEmptyTuples ps
 
 -- | See https://github.com/eignnx/funlang/issues/3
 exprHasNoEmptyTuples = \case
   TupleExpr [] -> False
   TupleExpr es -> all exprHasNoEmptyTuples es
+  VrntExpr _ es -> all exprHasNoEmptyTuples es
   _ -> True
 
 -- | See https://github.com/eignnx/funlang/issues/3
@@ -175,6 +176,12 @@ pattern TupleExpr es <-
   where
     TupleExpr es = at $ LiteralF $ Tuple es
 
+pattern VrntExpr :: String -> [Expr] -> Expr
+pattern VrntExpr tag es <-
+  LiteralF (Vrnt tag es) :@: _
+  where
+    VrntExpr tag es = at $ LiteralF $ Vrnt tag es
+
 vars :: [String]
 vars = take 1000 $ zipWith f (cycle ['a' .. 'z']) [0 ..]
   where
@@ -229,15 +236,20 @@ instance Arbitrary RefutPatPair where
     where
       gen 0 = emptyTuplePat
       gen 1 = varPat
-      gen n = tuplePat n
+      gen n = oneof [tuplePat n, vrntPat n]
       tuplePat n = do
+        (ps, es, bs) <- genProduct n
+        return $ RefutPatPair (TupleRefutPat ps) (TupleExpr es) bs
+      vrntPat n = do
+        tag <- elements [":Vrnt"]
+        (ps, es, bs) <- genProduct (n - 1)
+        return $ RefutPatPair (VrntRefutPat tag ps) (VrntExpr tag es) bs
+      genProduct n = do
         len <- chooseInt (0, n)
         patPairs <- replicateM len (gen (n `div` len))
-        let init = ([], [], S.empty)
-        let (ps, es, bindings) = foldr f init patPairs
-        return $ RefutPatPair (TupleRefutPat ps) (TupleExpr es) bindings
+        return $ foldr merge ([], [], S.empty) patPairs
         where
-          f (RefutPatPair p1 e1 b1) (ps, es, b0) =
+          merge (RefutPatPair p1 e1 b1) (ps, es, b0) =
             if S.null (S.intersection b0 b1) -- Ensure all pattern vars are unique.
               then (p1 : ps, e1 : es, S.union b0 b1)
               else discard
@@ -248,15 +260,29 @@ instance Arbitrary RefutPatPair where
         return $ RefutPatPair (VarRefutPat name) expr (S.singleton name)
 
   shrink (RefutPatPair _ (TupleExpr []) bs) = []
-  shrink (RefutPatPair (VarRefutPat _) _ bs) = [RefutPatPair (TupleRefutPat []) (TupleExpr []) bs]
-  shrink (RefutPatPair (TupleRefutPat [pat]) (TupleExpr [expr]) bs) = [RefutPatPair pat expr bs]
-  shrink (RefutPatPair (TupleRefutPat pats) (TupleExpr es) bs) = shrunkToVarPat : shrunkToSubPat
+  shrink (RefutPatPair _ (VrntExpr _ []) bs) = []
+  shrink (RefutPatPair (VarRefutPat _) _ bs) =
+    [ RefutPatPair (TupleRefutPat []) (TupleExpr []) bs,
+      RefutPatPair (VrntRefutPat ":Vrnt" []) (VrntExpr ":Vrnt" []) bs
+    ]
+  shrink (RefutPatPair (TupleRefutPat ps) (TupleExpr es) bs) =
+    shrunkToVarPat TupleExpr es bs : shrunkToSubPat ps es bs ++ shrunkToSubTuple
     where
-      shrunkToVarPat = RefutPatPair (VarRefutPat v) (TupleExpr es) (S.insert v bs)
-      v = head $ filter (`notElem` bs) vars
-      shrunkToSubPat = [RefutPatPair (TupleRefutPat pats') (TupleExpr es') bs | (pats', es') <- subs]
-      subs = map unzip $ init $ powerset $ zip pats es
+      shrunkToSubTuple = [RefutPatPair (TupleRefutPat ps') (TupleExpr es') bs | (ps', es') <- subs]
+      subs = map unzip $ init $ powerset $ zip ps es
+  shrink (RefutPatPair (VrntRefutPat t1 ps) (VrntExpr t2 es) bs)
+    | t1 == t2 =
+      shrunkToVarPat (VrntExpr t1) es bs : shrunkToSubPat ps es bs ++ shrunkToSubVrnt
+    where
+      shrunkToSubVrnt = [RefutPatPair (VrntRefutPat t1 ps') (VrntExpr t1 es') bs | (ps', es') <- subs]
+      subs = map unzip $ init $ powerset $ zip ps es
   shrink _ = undefined
+
+shrunkToSubPat ps es bs = zipWith (\p e -> RefutPatPair p e bs) ps es
+
+shrunkToVarPat ctor es bs = RefutPatPair (VarRefutPat v) (ctor es) (S.insert v bs)
+  where
+    v = head $ filter (`notElem` bs) vars
 
 newtype TupleGen = TupleGen Ast.Expr
 
@@ -321,17 +347,39 @@ instance Arbitrary Ty where
 instance Arbitrary Pat where
   arbitrary = oneof $ map (pure . VarPat) ["a", "b", "c"]
 
-instance Arbitrary (Lit a) where
-  arbitrary = sized $ \case
-    n ->
-      oneof
-        [ Int <$> arbitrary,
-          -- return Unit,
-          Bool <$> arbitrary,
-          pure (Text "blah")
-          -- Tuple [e]
-          -- Vrnt String [e]
-        ]
+instance Arbitrary (Lit Expr) where
+  arbitrary = sized gen
+    where
+      gen 0 = return Unit
+      gen 1 =
+        oneof
+          [ Bool <$> arbitrary,
+            return $ Text "blah",
+            Int <$> arbitrary
+          ]
+      gen n = oneof [genTuple n, genVrnt n]
+      genTuple n = do
+        len <- choose (0, n)
+        es <- map (at . LiteralF) <$> replicateM len (gen (n `div` len))
+        return $ Tuple es
+      genVrnt n = do
+        len <- choose (0, n)
+        es <- map (at . LiteralF) <$> replicateM len (gen (n `div` len))
+        return $ Vrnt ":Vrnt" es
+
+  shrink = \case
+    Bool b -> [Unit]
+    Int n -> [Unit]
+    Text s -> [Unit]
+    Unit -> []
+    Tuple [] -> [Unit]
+    Tuple es -> (\case LiteralF lit :@: _ -> [lit]; _ -> []) =<< es
+    Vrnt _ [] -> [Unit]
+    Vrnt tag es -> smallerVrnt -- ++ recShrunk
+      where
+        smallerVrnt = (\case LiteralF lit :@: _ -> [lit]; _ -> []) =<< es
+
+-- recShrunk = map  (map shrink es)
 
 instance Arbitrary BinOp where
   arbitrary = oneof [ArithOp <$> arbitrary]
@@ -339,8 +387,27 @@ instance Arbitrary BinOp where
 instance Arbitrary ArithOp where
   arbitrary = oneof $ pure <$> [Add, Sub, Mul]
 
-------------------------------------------------------------------------------------------
+------------------------------------MAIN--------------------------------------------------
 
 return [] -- Template Haskell: Stop here!
 
 main = $quickCheckAll
+
+-------------------------------------EXAMPLES---------------------------------------------
+
+explore :: IO ()
+explore = do
+  let qc prop = quickCheckWith (stdArgs {maxShrinks = 1000}) prop
+  let ex = RefutPatPair p e S.empty
+  print ex
+  qc $ prop_simpleLetElseHasNoRtErrs ex
+  putStrLn "---------------"
+  forM_ (shrink ex) $ \e -> do
+    print e
+    qc . prop_simpleLetElseHasNoRtErrs $ e
+    putStrLn ""
+  where
+    -- p = VrntRefutPat ":X" [VrntRefutPat ":X" [], VrntRefutPat ":X" []]
+    -- e = VrntExpr ":X" [VrntExpr ":X" [], VrntExpr ":X" []]
+    p = TupleRefutPat [VrntRefutPat ":X" [], VrntRefutPat ":X" []]
+    e = TupleExpr [VrntExpr ":X" [], VrntExpr ":X" []]

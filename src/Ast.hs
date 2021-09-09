@@ -189,7 +189,8 @@ instance Show e => Show (Lit e) where
     Text txt -> show txt
     Unit -> "nop"
     Tuple args -> braces $ commaSep (map show args)
-    Vrnt name args -> braces $ name ++ optList args
+    Vrnt name [] -> braces name
+    Vrnt name args -> braces $ name +++ intercalate ", " (map show args)
 
 data UnaryOp
   = Not
