@@ -113,7 +113,7 @@ impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
         match self {
-            VInt(x) => write!(f, "{}", x),
+            VInt(x) => write!(f, "#{}", x),
             VBool(x) => write!(f, "{}", x),
             VText(x) => write!(f, "{:?}", x),
             VInstrAddr(x) => write!(f, "@{}", x),

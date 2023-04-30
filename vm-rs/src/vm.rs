@@ -172,14 +172,29 @@ impl Vm {
         self.push_new_frame();
     }
 
+    fn vm_debug_view(&self, heap: &Heap, instr: &Instr) {
+        eprintln!("--------------------");
+
+        eprint!("heap = [");
+        for (addr, value) in heap.mem.iter().enumerate() {
+            eprint!("{}: {}, ", addr, value);
+        }
+        eprintln!("]");
+
+        eprint!("stack = [");
+        for value in &self.stack {
+            eprint!("{}, ", value);
+        }
+        eprintln!("] <- TOS");
+
+        eprintln!("instr {} = {:?}", self.pc, instr);
+    }
+
     fn step(&mut self, code: &[Instr], heap: &mut Heap, debug: bool) {
         let instr = &code[self.pc.0];
 
         if debug {
-            eprintln!("--------------------");
-            eprintln!("heap = {:?}", heap);
-            eprintln!("stack = {:?}", self.stack);
-            eprintln!("instr {} = {:?}", self.pc, instr);
+            self.vm_debug_view(heap, instr);
         }
 
         match instr {
