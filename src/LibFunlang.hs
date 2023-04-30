@@ -24,6 +24,7 @@ import System.Exit (ExitCode (..), exitWith)
 import System.FilePath ((</>))
 import System.IO (IOMode (WriteMode), hClose, hPutStrLn, openFile)
 import System.Process (createProcess, proc, waitForProcess)
+import System.Info (os)
 import qualified TastToHir
 import Text.Printf (printf)
 import qualified ToLir
@@ -32,7 +33,8 @@ import qualified TyCheck
 data Opts = Opts
   { filename :: String,
     traceCompilation :: Bool,
-    traceVm :: Bool
+    traceVm :: Bool,
+    release :: Bool
   }
   deriving (Show)
 
@@ -58,11 +60,14 @@ getOpts = do
       let traceVm =
             flags `hasSubFlag` ("-T", "v", "--trace-vm")
               || flags `hasFlag` ("-T", "--trace-all")
+      let release =
+            flags `hasFlag` ("-R", "--release")
       return $
         Opts
           { filename = filename,
             traceCompilation = traceCompilation,
-            traceVm = traceVm
+            traceVm = traceVm,
+            release = release
           }
 
 parseAndCompile opts = do
@@ -115,8 +120,10 @@ execVmProgram opts lir = do
 
 runRustSubprocess opts bcFileName = do
   let releaseArg = ["--release"]
+  let profile = if release opts then "release" else "debug"
   let traceArg = ["--trace-vm" | traceVm opts]
-  let exe = "." </> "vm-rs" </> "target" </> "release" </> "vm-rs.exe"
+  let exeName = if os == "windows" then "vm-rs.exe" else "vm-rs"
+  let exe = "." </> "vm-rs" </> "target" </> profile </> exeName
   let cmd = proc exe $ bcFileName : traceArg
   (_, _, _, h) <- createProcess cmd
   waitForProcess h
