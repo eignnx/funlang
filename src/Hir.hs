@@ -49,7 +49,7 @@ data Instr
   | Alloc Int -- `Alloc n` allocates a contiguous block of memory of size `n`.
   | MemWriteDirect Int -- `MemWriteDirect i` performs `(TOS+1)[i] = TOS`.
   | MemReadDirect Int -- `MemReadDirect  i` performs `(TOS)[i]`.
-  | TestDiscr Int -- Tests the discriminant field of a variant.
+  | TestDiscr Int -- `TestDiscr d` compares the discriminant field of a variant on the TOS against `d`.
   | Nop
   | JmpIfFalse Lbl
   | Jmp Lbl
