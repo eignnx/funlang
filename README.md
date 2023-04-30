@@ -138,6 +138,17 @@ def main[] do
 end
 ```
 
+## Build/Run Instructions
+### Dependencies
+- You need `stack` installed. I'm using version `2.9.3` just FYI.
+- `Stack` should be using `ghc-8.10.4` for the haskell compiler.
+- You need `cargo` to run the Rust bytecode interpreter.
+
+### Running a Source File
+```bash
+$ stack run -- path/to/my/source-file.funlang
+```
+
 ## Features/TODO
 - [X] Compile a (somewhat) high-level language down to bytecode that can be run on a virtual machine
     - [X] Impl basic operations, and control flow statements

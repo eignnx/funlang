@@ -44,6 +44,7 @@ extra-deps:
 - process-1.6.11.0@sha256:472c51a8903b55b1b423e7e4050facd1dce5e323fd81e5953f02ca500bb9d58c,2819
 - directory-1.3.6.1@sha256:f2acb73dd32f696da0d8228258d37ab654b804f20117a75f25c76fd05fe2c2e5,2940
 - time-1.11.1.1@sha256:bdd516b0c30b12426053186c4c38d76b05c274f3a427e654cdc1ddd23a4d6f85,6230
+- unix-2.7.3
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
