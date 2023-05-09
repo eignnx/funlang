@@ -1,17 +1,27 @@
-% item(fn_def(Name, Params, Body)) -->
-%     [kw(def)], !, [id(Name)], param_list(Params), [kw(do)], expr(Body), [kw(end)].
-
-% param(param(Name, Type)) --> [id(Name), sym(:)], type(Type).
-
-% param_list([]) --> [sym(oparen)], !, [sym(cparen)].
-% param_list([]) --> [sym(oparen)], !, [sym(cparen)].
-% param_list([]) --> [sym(oparen)], !, [sym(cparen)].
+:- use_module(library(dcg/high_order)).
 
 
-% data Seq e -- <sequence> -->
-%   = Empty --            | lookahead{END}
-%   | Result e --            | <expr> lookahead{END}
-%   | Semi e (Seq e) --            | <expr> SEMICOLON <sequence>
+item(def(Name, Body, RetTy)) -->
+    [kw(def)], !, [id(Name), sym('[')],
+    [],
+    [sym(']'), sym(->), ty(RetTy), kw(do)],
+    expr(Body),
+    [kw(end)].
+
+item(type(Name, Variants)) -->
+    [kw(type)], optional([kw(rec)], []), [id(Name)],
+    sequence(variant_arm, Variants),
+    [kw(end)].
+
+variant_arm(ctor(Name, Tys)) -->
+    [sym('|'), sym(:), id(Name)], !, sequence(ty, [sym(',')], Tys).
+variant_arm(supertype(Name)) --> [sym('|'), id(Name)].
+
+ty(prim(void)) --> [id('Void')].
+ty(prim(bool)) --> [id('Bool')].
+ty(prim(int)) --> [id('Int')].
+ty(prim(nat)) --> [id('Nat')].
+ty(alias(Name)) --> [id(Name)].
 
 :- table expr//1.
 
@@ -20,10 +30,14 @@ expr(lit(bool(B))) --> [lit(bool(B))], !.
 expr(add(A, B)) --> expr(A), [sym(+)], !, expr(B).
 expr(sub(A, B)) --> expr(A), [sym(-)], !, expr(B).
 expr(if(Cond, Yes, No)) -->
-    [kw(if)], !, expr(Cond), [kw(then)], expr(Yes), [kw(else)], expr(No), [kw(end)].
+    [kw(if)], !, expr(Cond),
+    [kw(then)], expr(Yes),
+    [kw(else)], expr(No),
+    [kw(end)].
 expr(let(X, Expr)) --> [kw(let)], !, [id(X), sym(=)], expr(Expr).
 expr(seq(A, B)) --> expr(A), [sym(;)], !, expr(B).
 expr(var(X)) --> [id(X)], !.
+expr(block(Expr)) --> [kw(do)], !, expr(Expr), [kw(end)].
 expr(Expr) --> { throw(error(unimplemented(Expr))) }.
 
 /*
