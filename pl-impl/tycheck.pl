@@ -49,6 +49,18 @@ ast_tast(intr(dbg_int, Arg0), intr(dbg_int, Arg :: int) :: void) -->
 ast_tast(intr(dbg_bool, Arg0), intr(dbg_bool, Arg :: bool) :: void) -->
     ast_tast(Arg0, Arg :: bool).
 
+ast_tast(lam(Param, Body0), lam(Param, Body) :: (ParamTy -> RetTy)) -->
+    state(St0),
+    define(Param :: ParamTy),
+    ast_tast(Body0, Body),
+    { Body = _ :: RetTy },
+    state(_, St0).
+
+ast_tast(call(Fn0, Arg0), call(Fn, Arg) :: RetTy) -->
+    ast_tast(Fn0, Fn :: (ParamTy -> RetTy)),
+    ast_tast(Arg0, Arg),
+    { Arg = _ :: ArgTy },
+    { ArgTy = ParamTy }.
 
 
 tycheck(Ast, Tast :: Ty, Tcx0) :-
