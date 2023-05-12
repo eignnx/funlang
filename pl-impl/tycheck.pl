@@ -1,9 +1,10 @@
 :- op(10, xfy, ::).
 
-:- discontiguous ast_tast/4.
-% :- det(ast_tast/4).
+:- discontiguous ast_tast//2.
+% :- det(ast_tast//2).
 
 ast_tast(lit(int(N)), lit(int(N)) :: int) --> [].
+ast_tast(lit(nat(N)), lit(nat(N)) :: nat) --> [].
 
 ast_tast(lit(bool(B)), lit(bool(B)) :: bool) --> [].
 
@@ -15,9 +16,14 @@ lit_list_ast_tast([X0 | Xs0], [X :: XTy | Xs], XTy) -->
     ast_tast(X0, X :: XTy),
     lit_list_ast_tast(Xs0, Xs, XTy).
 
-ast_tast(add(A0, B0), add(A :: int, B :: int) :: int) -->
-    ast_tast(A0, A :: int),
-    ast_tast(B0, B :: int).
+ast_tast(binop(Op, A0, B0), binop(Op, A :: T1, B :: T2) :: T3) -->
+    ast_tast(A0, A :: T1),
+    ast_tast(B0, B :: T2),
+    { binop_sig(Op, T1->T2->T3) }.
+
+ast_tast(unop(Op, E), unop(Op, A :: T1) :: T2) -->
+    ast_tast(A0, E :: T1),
+    { unop_sig(Op, T1->T2) }.
 
 ast_tast(var(X), var(X) :: Ty) --> var_ty(X, Ty).
 
@@ -71,3 +77,20 @@ tycheck(Ast, Tast :: Ty) :-
     tycheck(Ast, Tast :: Ty, Tcx0).
 
 inital_tcx([]).
+
+
+binop_sig(Op, bool->bool->bool) :- memberchk(Op, ['and', 'or', 'xor']).
+binop_sig(Op, Ty->Ty->bool) :-
+    memberchk(Op, ['>', '<', '>=', '<=']),
+    memberchk(Ty, [nat, int]).
+binop_sig(Op, Ty->Ty->bool) :- memberchk(Op, ['==', '!=']).
+binop_sig(Op, Ty->Ty->Ty) :-
+    memberchk(Op, ['+', '-', '*', '/']),
+    memberchk(Ty, [nat, int]).
+binop_sig('^', nat->nat->nat).
+binop_sig('++', text->text->text).
+binop_sig('**', Ty->nat->Ty) :- memberchk(Ty, [text, list(_), array(_)]).
+
+unop_sig('-', int->int).
+unop_sig('!', bool->bool).
+unop_sig('~', nat->nat). % TODO: Allow more types here?

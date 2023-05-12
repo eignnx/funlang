@@ -1,3 +1,5 @@
+:- module(lex, [tokens//1]).
+
 :- use_module(library(dcg/basics), [
     % csym//1, % WHY NO WORK??
     integer//1,
@@ -15,7 +17,8 @@
 tokens([T | Ts]) --> blanks, tok(T), !, tokens(Ts).
 tokens([]) --> blanks, eos.
 
-tok( lit(int(I)) ) --> integer(I).
+tok( lit(nat(I)) ) --> integer(I), !.
+tok( lit(int(I)) ) --> (['-'] | ['+']), integer(I), !.
 tok( lit(bool(true)) ) --> atom(true), !.
 tok( lit(bool(false)) ) --> atom(false), !.
 tok( lit(text(Txt)) ) --> ['"'], !, string_without("\"", Txt), ['"'].
@@ -29,24 +32,29 @@ keyword(do). keyword(end).
 keyword(if). keyword(match). keyword(while).
 keyword(fn).
 keyword(let).
-keyword(and). keyword(or).
+keyword(and). keyword(or). keyword(not). keyword(xor).
 
 symbol('('). symbol(')').
 symbol('['). symbol(']').
 symbol('{'). symbol('}').
-symbol('.').
+symbol('...'). symbol('..='). symbol('..'). symbol('.').
 symbol(',').
+symbol('::').
+symbol(':=').
 symbol(':').
 symbol(';').
 symbol('->').
-symbol('|').
 symbol('=>').
-symbol('++').
+symbol('==').
+symbol('!=').
+symbol('=').
+symbol('!!'). symbol('||').
+symbol('|').
+symbol('!'). symbol('~').
+symbol('++'). symbol('**'). symbol('^').
 symbol('+'). symbol('-'). symbol('*'). symbol('/').
-symbol('>=').
-symbol('<=').
-symbol('>').
-symbol('<').
+symbol('<<'). symbol('>>').
+symbol('>='). symbol('<='). symbol('>'). symbol('<').
 
 % COPY PASTED FROM SWI SOURCE.
 csym(Name) -->
