@@ -1,38 +1,53 @@
+:- module(tast_to_hir, [hir//1, type_size/2]).
+:- use_module(tycheck, [
+    op(10, xfy, ::)
+]).
 
-hir(lit(int(I)) :: _) --> ['Load'('VInt'(I))].
+:- det(hir//1).
 
-hir(lit(bool(B)) :: _) --> ['Load'('VBool'(B))].
+hir(lit(int(I)) :: _) --> [const(qword, int(I))].
+hir(lit(nat(I)) :: _) --> [const(qword, nat(I))].
+hir(lit(bool(B)) :: _) --> [const(byte, bool(B))].
 
-hir(add(A, B) :: Ty) --> hir(A), hir(B), ['Add'(Ty)].
-hir(sub(A, B) :: Ty) --> hir(A), hir(B), ['Sub'(Ty)].
-hir(mul(A, B) :: Ty) --> hir(A), hir(B), ['Mul'(Ty)].
-hir(div(A, B) :: Ty) --> hir(A), hir(B), ['Div'(Ty)].
-hir(and(A, B) :: _) --> hir(A), hir(B), ['And'].
-hir(or(A, B) :: _) --> hir(A), hir(B), ['Or'].
+hir(binop(+, A, B) :: Ty) --> hir(A), hir(B), [add(Ty)].
+hir(binop(-, A, B) :: Ty) --> hir(A), hir(B), [sub(Ty)].
+hir(binop(*, A, B) :: Ty) --> hir(A), hir(B), [mul(Ty)].
+hir(binop(/, A, B) :: Ty) --> hir(A), hir(B), [div(Ty)].
+hir(binop(and, A, B) :: _) --> hir(A), hir(B), [and].
+hir(binop(or, A, B) :: _) --> hir(A), hir(B), [or].
+hir(binop(xor, A, B) :: _) --> hir(A), hir(B), [over, over, or, rot, rot, and, not, and].
+hir(binop('>', A, B) :: Ty) --> hir(A), hir(B), [gt(Ty)].
+hir(binop('<', A, B) :: Ty) --> hir(A), hir(B), [lt(Ty)].
+hir(binop('==', A, B) :: _) --> hir(A), hir(B), [eq].
+hir(binop('!=', A, B) :: _) --> hir(A), hir(B), [eq, not].
+hir(binop('>=', A, B) :: Ty) --> hir(A), hir(B), [over, over, gt(Ty), eq, or].
+hir(binop('<=', A, B) :: Ty) --> hir(A), hir(B), [over, over, lt(Ty), eq, or].
 
-hir(neg(A) :: Ty) --> hir(A), ['Neg'(Ty)].
-hir(not(A) :: _) --> hir(A), ['Not'].
+hir(let(X, Expr :: Ty) :: _) -->
+    hir(Expr :: Ty),
+    [store(local(X) :: Ty)].
 
-hir(let(X, Expr) :: _) --> hir(Expr), ['Store'(X)].
-
-hir(var(X) :: Ty) --> ['Load'(X :: Ty)].
+hir(var(X) :: Ty) --> [load(local(X) :: Ty)].
 
 hir(if(Cond, Yes, No) :: _) -->
     hir(Cond),
-    ['JmpIfFalse'(Else)],
+    [jmp_if_false(jmp_tgt(Else))],
     hir(Yes),
-    ['Jmp'(End)],
-    ['Label'(Else)],
+    [jmp(jmp_tgt(End))],
+    [label(Else)],
     hir(No),
-    ['Label'(End)].
+    [label(End)].
 
 hir(seq(A, B) :: _) -->
     hir(A),
-    ( { A = _ :: ATy, zero_sized(ATy) } -> [] ; ['Pop'] ),
+    { A = _ :: ATy, type_size(ATy, N) },
+    ( { N =:= 0 } -> [] ; [pop, word(nat(N))] ),
     hir(B).
 
-hir(Other) --> { throw(error(unimplemented(hir(Other)))) }.
 
-
-zero_sized(void).
+%% Size in bytes.
+type_size(void, 0).
+type_size(int, 8). % TODO: Make arch independent?
+type_size(nat, 8). % TODO: Make arch independent?
+type_size(bool, 1).
 

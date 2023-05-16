@@ -1,4 +1,7 @@
-:- op(10, xfy, ::).
+:- module(tycheck, [
+    ast_tast//2,
+    op(10, xfy, ::)
+]).
 
 :- discontiguous ast_tast//2.
 % :- det(ast_tast//2).
@@ -21,8 +24,8 @@ ast_tast(binop(Op, A0, B0), binop(Op, A :: T1, B :: T2) :: T3) -->
     ast_tast(B0, B :: T2),
     { binop_sig(Op, T1->T2->T3) }.
 
-ast_tast(unop(Op, E), unop(Op, A :: T1) :: T2) -->
-    ast_tast(A0, E :: T1),
+ast_tast(unop(Op, E0), unop(Op, E :: T1) :: T2) -->
+    ast_tast(E0, E :: T1),
     { unop_sig(Op, T1->T2) }.
 
 ast_tast(var(X), var(X) :: Ty) --> var_ty(X, Ty).
