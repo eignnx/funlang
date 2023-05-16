@@ -15,7 +15,6 @@ unsigned_bytes(MemSpec, U) -->
     { natural_bytes(U, Bs, NBytes) },
     Bs.
 
-:- det(signed_bytes//2).
 signed_bytes(MemSpec, S) -->
     { memspec_size(MemSpec, NBytes) },
     { integer_bytes(S, Bs, NBytes) },
@@ -25,13 +24,17 @@ int_bounds(NBytes, Hi, Lo) :-
     Hi #= 256^NBytes // 2 - 1,
     Lo #= -(256^NBytes) // 2.
 
-integer_bytes(I0, Bs, NBytes) :-
+integer_bytes(I, Bs, NBytes) :-
     int_bounds(NBytes, Hi, Lo),
-    I0 in Lo..Hi,
-    (  I0 #< 0
-    -> I #= I0 mod 256^NBytes
-    ;  I #= I0
-    ),
+    I in Lo..Hi,
+    zcompare(Cmp, I, 0),
+    integer_bytes(Cmp, I, Bs, NBytes).
+integer_bytes(<, I0, Bs, NBytes) :-
+    I #= I0 mod 256^NBytes, % Essentially do bit-inversion.
+    natural_bytes(I, Bs, NBytes).
+integer_bytes(>, I, Bs, NBytes) :-
+    natural_bytes(I, Bs, NBytes).
+integer_bytes(=, I, Bs, NBytes) :-
     natural_bytes(I, Bs, NBytes).
 
 :- det(natural_bytes/3).

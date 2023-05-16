@@ -1,4 +1,4 @@
-:- module(hir_to_lir, [instr/1, lir//1]).
+:- module(hir_to_lir, [instr/1, lir//1, hir_to_lir//1]).
 :- use_module(tycheck, [
     op(10, xfy, ::)
 ]).
@@ -62,8 +62,6 @@ immediate_bytes_(jmp_tgt(Lbl), MemSpec) --> unsigned_bytes(MemSpec, Lbl).
 immediate_bytes_(local(Local), MemSpec) --> unsigned_bytes(MemSpec, Local).
 
 
-% :- det(lir//1).
-
 lir(const(MemSpec, Imm)) -->
 	lir(const(MemSpec)),
 	immediate_bytes(MemSpec, Imm).
@@ -97,3 +95,9 @@ lir(syscall(N)) -->
 lir(Instr) -->
     [OpCode],
     { instr_opcode(Instr, OpCode) }.
+
+
+hir_to_lir([]) --> [].
+hir_to_lir([Hir | Hirs]) -->
+    lir(Hir),
+    hir_to_lir(Hirs).
