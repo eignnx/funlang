@@ -37,29 +37,27 @@ instr(syscall).     % [syscall, short(SyscallNumber)]
     bagof(Instr, instr(Instr), Instrs),
     forall(
         nth0(Index, Instrs, Instr),
-        assertz(instr_opcode(Instr, Index) :- !)
+        assertz(instr_opcode(Instr, Index))
     ),
     ( length(Instrs, N), N > 256 ->
         throw(error(too_many_opcodes(actual(N), max(256))))
     ; true
     ).
 
-:- det(type_memspec/2).
-
 type_memspec(bool, byte).
-type_memspec(nat, qword).
-type_memspec(int, qword).
+type_memspec(nat, qword). type_memspec(nat, word). type_memspec(nat, short). type_memspec(nat, byte).
+type_memspec(int, qword). type_memspec(int, word). type_memspec(int, short). type_memspec(int, byte).
 type_memspec(jmp_tgt, word).
 type_memspec(local, short).
 
 immediate_bytes(MemSpec, Imm) --> immediate_bytes_(Imm, MemSpec).
 
-immediate_bytes_(bool(true), MemSpec)   --> unsigned_bytes(MemSpec, 1).
-immediate_bytes_(bool(false), MemSpec)  --> unsigned_bytes(MemSpec, 0).
-immediate_bytes_(nat(N), MemSpec)       --> unsigned_bytes(MemSpec, N).
-immediate_bytes_(int(N), MemSpec)       --> signed_bytes(MemSpec, N).
-immediate_bytes_(jmp_tgt(Lbl), MemSpec) --> unsigned_bytes(MemSpec, Lbl).
-immediate_bytes_(local(Local), MemSpec) --> unsigned_bytes(MemSpec, Local).
+immediate_bytes_(bool(true), MemSpec)   --> unsigned_bytes(MemSpec, 1),     {type_memspec(bool, MemSpec)}.
+immediate_bytes_(bool(false), MemSpec)  --> unsigned_bytes(MemSpec, 0),     {type_memspec(bool, MemSpec)}.
+immediate_bytes_(nat(N), MemSpec)       --> unsigned_bytes(MemSpec, N),     {type_memspec(nat, MemSpec)}.
+immediate_bytes_(int(N), MemSpec)       -->   signed_bytes(MemSpec, N),     {type_memspec(int, MemSpec)}.
+immediate_bytes_(jmp_tgt(Lbl), MemSpec) --> unsigned_bytes(MemSpec, Lbl),   {type_memspec(jmp_tgt, MemSpec)}.
+immediate_bytes_(local(Local), MemSpec) --> unsigned_bytes(MemSpec, Local), {type_memspec(local, MemSpec)}.
 
 
 lir(const(MemSpec, Imm)) -->
