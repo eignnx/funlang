@@ -77,8 +77,9 @@ exe(gt(Ty)) do ( num(A, Ty), num(B, Ty) -- bool(C) ) where
 exe(lt(Ty)) do ( num(A, Ty), num(B, Ty) -- bool(C) ) where
     A #< B -> C = true ; C = false.
 
-exe(eq(MemSpec)) do ( bytes(A, MemSpec), bytes(B, MemSpec) -- bool(C) ) where
+exe(eq(NBytes)) do ( bytes(A, NBytes), bytes(B, NBytes) -- bool(C) ) where
     A == B -> C = true ; C = false.
+
 
 :- use_module(library(plunit)).
 :- begin_tests(interp).
@@ -122,5 +123,17 @@ test(gt_nat_false) :-
     phrase((num(1, nat), num(2, nat)), OneTwo),
     phrase(exe(gt(nat)), OneTwo, EndStack),
     assertion(EndStack = [0]).
+
+test(eq_nat_false) :-
+    phrase((num(1, nat), num(2, nat)), OneTwo),
+    memspec_size(qword, NBytes),
+    phrase(exe(eq(NBytes)), OneTwo, EndStack),
+    assertion(EndStack = [0]).
+
+test(eq_nat_true) :-
+    phrase((num(500, nat), num(500, nat)), OneTwo),
+    memspec_size(qword, NBytes),
+    phrase(exe(eq(NBytes)), OneTwo, EndStack),
+    assertion(EndStack = [1]).
 
 :- end_tests(interp).
