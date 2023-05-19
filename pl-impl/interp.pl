@@ -74,6 +74,12 @@ exe(div(Ty)) do ( num(A, Ty), num(B, Ty) -- num(C, Ty) ) where
 exe(gt(Ty)) do ( num(A, Ty), num(B, Ty) -- bool(C) ) where
     A #> B -> C = true ; C = false.
 
+exe(lt(Ty)) do ( num(A, Ty), num(B, Ty) -- bool(C) ) where
+    A #< B -> C = true ; C = false.
+
+exe(eq(MemSpec)) do ( bytes(A, MemSpec), bytes(B, MemSpec) -- bool(C) ) where
+    A == B -> C = true ; C = false.
+
 :- use_module(library(plunit)).
 :- begin_tests(interp).
 
