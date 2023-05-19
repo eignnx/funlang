@@ -1,43 +1,43 @@
-:- module(hir_to_lir, [instr/1, lir//1, hir_to_lir//1]).
-:- use_module(tycheck, [
-    op(10, xfy, ::)
-]).
-:- use_module(serde, [
-    unsigned_bytes//2,
-    signed_bytes//2
-]).
-:- use_module(tast_to_hir, [
-    type_size/2
+:- module(hir_to_lir, [
+    hir_to_lir//1,
+    lir//1,
+    lir_instr/1,
+    immediate_bytes//2
 ]).
 
-instr(halt). instr(nop).
-instr(const(byte)).
-instr(const(short)).
-instr(const(word)).
-instr(const(qword)).
-instr(add(nat)). instr(add(int)).
-instr(sub(nat)). instr(sub(int)).
-instr(mul(nat)). instr(mul(int)).
-instr(div(nat)). instr(div(int)).
-instr(and). instr(or). instr(not).
-instr(pop). instr(over). instr(rot).
-instr(gt(nat)). instr(gt(int)).
-instr(lt(nat)). instr(lt(int)).
-instr(eq).
-instr(jmp). instr(jmp_if_false). % [jmp/jmp_if_false, word(Label)]
-instr(call).                     % [call, byte(NArgs), word(Label)]
-instr(call_indirect).            % [call_indirect, byte(NArgs)]
-instr(ret).
-instr(load_local).  % [load_local,  short(NBytes), short(Index)]
-instr(store_local). % [store_local, short(NBytes), short(Index)]
-instr(syscall).     % [syscall, short(SyscallNumber)]
+:- use_module(tycheck, [op(10, xfy, ::)]).
+:- use_module(serde, [unsigned_bytes//2, signed_bytes//2]).
+:- use_module(hir, [hir_instr/1, hir_instr_annotated/2]).
+:- use_module(ty, [type_size/2]).
 
-% Initialize the `instr_opcode` database table.
-:-  abolish(instr_opcode/2),
-    bagof(Instr, instr(Instr), Instrs),
+lir_instr(halt). lir_instr(nop).
+lir_instr(const(byte)).
+lir_instr(const(short)).
+lir_instr(const(word)).
+lir_instr(const(qword)).
+lir_instr(add(nat)). lir_instr(add(int)).
+lir_instr(sub(nat)). lir_instr(sub(int)).
+lir_instr(mul(nat)). lir_instr(mul(int)).
+lir_instr(div(nat)). lir_instr(div(int)).
+lir_instr(and). lir_instr(or). lir_instr(not).
+lir_instr(pop). lir_instr(over). lir_instr(rot).
+lir_instr(gt(nat)). lir_instr(gt(int)).
+lir_instr(lt(nat)). lir_instr(lt(int)).
+lir_instr(eq).
+lir_instr(jmp). lir_instr(jmp_if_false). % [jmp/jmp_if_false, word(Label)]
+lir_instr(call).                         % [call, byte(NArgs), word(Label)]
+lir_instr(call_indirect).                % [call_indirect, byte(NArgs)]
+lir_instr(ret).
+lir_instr(load_local).  % [load_local,  short(NBytes), short(Index)]
+lir_instr(store_local). % [store_local, short(NBytes), short(Index)]
+lir_instr(syscall).     % [syscall, short(SyscallNumber)]
+
+% Initialize the `lir_instr_opcode` database table.
+:-  abolish(lir_instr_opcode/2),
+    bagof(Instr, lir_instr(Instr), Instrs),
     forall(
-        nth0(Index, Instrs, Instr),
-        assertz(instr_opcode(Instr, Index))
+        nth0(Index, Instrs, Instr_),
+        assertz(lir_instr_opcode(Instr_, Index))
     ),
     ( length(Instrs, N), N > 256 ->
         throw(error(too_many_opcodes(actual(N), max(256))))
@@ -60,42 +60,58 @@ immediate_bytes_(jmp_tgt(Lbl), MemSpec) --> unsigned_bytes(MemSpec, Lbl),   {typ
 immediate_bytes_(local(Local), MemSpec) --> unsigned_bytes(MemSpec, Local), {type_memspec(local, MemSpec)}.
 
 
-lir(const(MemSpec, Imm)) -->
-	lir(const(MemSpec)),
+lir(+const(MemSpec, Imm)) -->
+	opcode(const(MemSpec)),
 	immediate_bytes(MemSpec, Imm).
-lir(load(Local :: Ty)) -->
+lir(+load(Local :: Ty)) -->
 	{ type_size(Ty, NBytes) },
-	lir(load_local),
+	opcode(load_local),
 	unsigned_bytes(short, NBytes),
 	immediate_bytes(short, Local).
-lir(store(Local :: Ty)) -->
+lir(+store(Local :: Ty)) -->
 	{ type_size(Ty, NBytes) },
-	lir(store_local),
+	opcode(store_local),
 	unsigned_bytes(short, NBytes),
 	immediate_bytes(short, Local).
-lir(jmp(Label)) -->
-    lir(jmp),
+lir(+jmp(Label)) -->
+    opcode(jmp),
     unsigned_bytes(word, Label).
-lir(jmp_if_false(Label)) -->
-    lir(jmp_if_false),
+lir(+jmp_if_false(Label)) -->
+    opcode(jmp_if_false),
     unsigned_bytes(word, Label).
-lir(call(NArgs, Label)) -->
-    lir(call),
+lir(+call(NArgs, Label)) -->
+    opcode(call),
     unsigned_bytes(byte, NArgs),
     unsigned_bytes(word, Label).
-lir(call_indirect(NArgs)) -->
-    lir(call_indirect),
+lir(+call_indirect(NArgs)) -->
+    opcode(call_indirect),
     unsigned_bytes(byte, NArgs).
-lir(syscall(N)) -->
-    lir(syscall),
+lir(+syscall(N)) -->
+    opcode(syscall),
     unsigned_bytes(short, N).
+lir(+pop(NBytes)) -->
+    opcode(pop),
+    unsigned_bytes(short, NBytes).
 
-lir(Instr) -->
+lir(-Instr) --> opcode(Instr).
+    
+opcode(Instr) -->
     [OpCode],
-    { instr_opcode(Instr, OpCode) }.
-
+    { lir_instr_opcode(Instr, OpCode) }.
 
 hir_to_lir([]) --> [].
 hir_to_lir([Hir | Hirs]) -->
-    lir(Hir),
+    { hir_instr_annotated(Hir, HirAnn) },
+    lir(HirAnn),
     hir_to_lir(Hirs).
+
+:- use_module(library(plunit)).
+:- begin_tests(hir_to_lir).
+
+test(const_const_add_roundtrip_thru_bytes) :-
+    Hir = [const(byte, int(1)), const(byte, int(-1)), add(int)],
+    once(phrase(hir_to_lir(Hir), Bytes)),
+    findall(Guess, phrase(hir_to_lir(Guess), Bytes), Guesses),
+    memberchk(Guess, Guesses).
+
+:- end_tests(hir_to_lir).

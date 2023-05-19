@@ -1,7 +1,8 @@
-:- module(tast_to_hir, [hir//1, type_size/2]).
+:- module(tast_to_hir, [hir//1]).
 :- use_module(tycheck, [
     op(10, xfy, ::)
 ]).
+:- use_module(ty, [type_size/2]).
 
 :- det(hir//1).
 
@@ -40,14 +41,6 @@ hir(if(Cond, Yes, No) :: _) -->
 
 hir(seq(A, B) :: _) -->
     hir(A),
-    { A = _ :: ATy, type_size(ATy, N) },
-    ( { N =:= 0 } -> [] ; [pop, word(nat(N))] ),
+    { A = _ :: ATy, type_size(ATy, NBytes) },
+    ( { NBytes =:= 0 } -> [] ; [pop(NBytes)] ),
     hir(B).
-
-
-%% Size in bytes.
-type_size(void, 0).
-type_size(int, 8). % TODO: Make arch independent?
-type_size(nat, 8). % TODO: Make arch independent?
-type_size(bool, 1).
-
