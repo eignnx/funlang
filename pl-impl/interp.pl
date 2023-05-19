@@ -90,31 +90,31 @@ test(not) :-
     assertion(EndStack = [0]).
 
 test(const_short_int) :-
-    once(phrase(exe(const(short, int(123))), [], EndStack)),
+    phrase(exe(const(short, int(123))), [], EndStack),
     assertion(EndStack = [0, 123]).
 
 test(add_nat) :-
     phrase(num(1, nat), One),
     phrase(num(2, nat), Two),
-    once(phrase(num(3, nat), Three)),
+    phrase(num(3, nat), Three),
     append(One, Two, OneTwo),
-    once(phrase(exe(add(nat)), OneTwo, EndStack)),
+    phrase(exe(add(nat)), OneTwo, EndStack),
     assertion(EndStack = Three).
 
 test(add_int) :-
     phrase((num(-50, int), num(100, int)), AB),
-    once(phrase(num(50, int), C)),
-    once(phrase(exe(add(int)), AB, EndStack)),
+    phrase(num(50, int), C),
+    phrase(exe(add(int)), AB, EndStack),
     assertion(EndStack = C).
 
 test(gt_nat_true) :-
     phrase((num(2, nat), num(1, nat)), TwoOne),
-    once(phrase(exe(gt(nat)), TwoOne, EndStack)),
+    phrase(exe(gt(nat)), TwoOne, EndStack),
     assertion(EndStack = [1]).
 
 test(gt_nat_false) :-
     phrase((num(1, nat), num(2, nat)), OneTwo),
-    once(phrase(exe(gt(nat)), OneTwo, EndStack)),
+    phrase(exe(gt(nat)), OneTwo, EndStack),
     assertion(EndStack = [0]).
 
 :- end_tests(interp).
