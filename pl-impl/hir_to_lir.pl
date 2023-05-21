@@ -52,12 +52,14 @@ type_memspec(local, short).
 
 immediate_bytes(MemSpec, Imm) --> immediate_bytes_(Imm, MemSpec).
 
-immediate_bytes_(bool(true), MemSpec)   --> unsigned_bytes(MemSpec, 1),     {type_memspec(bool, MemSpec)}.
-immediate_bytes_(bool(false), MemSpec)  --> unsigned_bytes(MemSpec, 0),     {type_memspec(bool, MemSpec)}.
+immediate_bytes_(bool(B), byte)         --> [N], { byte_bool(N, B) }.
 immediate_bytes_(nat(N), MemSpec)       --> unsigned_bytes(MemSpec, N),     {type_memspec(nat, MemSpec)}.
 immediate_bytes_(int(N), MemSpec)       -->   signed_bytes(MemSpec, N),     {type_memspec(int, MemSpec)}.
 immediate_bytes_(jmp_tgt(Lbl), MemSpec) --> unsigned_bytes(MemSpec, Lbl),   {type_memspec(jmp_tgt, MemSpec)}.
 immediate_bytes_(local(Local), MemSpec) --> unsigned_bytes(MemSpec, Local), {type_memspec(local, MemSpec)}.
+
+byte_bool(0, false).
+byte_bool(1, true).
 
 
 lir(+const(MemSpec, Imm)) -->
@@ -95,9 +97,7 @@ lir(+pop(NBytes)) -->
 
 lir(-Instr) --> opcode(Instr).
     
-opcode(Instr) -->
-    [OpCode],
-    { lir_instr_opcode(Instr, OpCode) }.
+opcode(Instr) --> [OpCode], { lir_instr_opcode(Instr, OpCode) }.
 
 hir_to_lir([]) --> [].
 hir_to_lir([Hir | Hirs]) -->
@@ -108,10 +108,26 @@ hir_to_lir([Hir | Hirs]) -->
 :- use_module(library(plunit)).
 :- begin_tests(hir_to_lir).
 
-test(const_const_add_roundtrip_thru_bytes) :-
-    Hir = [const(byte, int(1)), const(byte, int(-1)), add(int)],
-    once(phrase(hir_to_lir(Hir), Bytes)),
-    findall(Guess, phrase(hir_to_lir(Guess), Bytes), Guesses),
-    memberchk(Guess, Guesses).
+test('[const, const, add] roundtrip thru bytes') :-
+    Hir = [const(qword, int(1)), const(qword, int(-1)), add(int)],
+    phrase(hir_to_lir(Hir), Bytes),
+    phrase(hir_to_lir(Guess), Bytes),
+    Hir = Guess.
+
+test('immediate_bytes: bool(true) from atom') :-
+    phrase(immediate_bytes(byte, bool(true)), What),
+    What == [1].
+
+test('immediate_bytes: bool(false) from atom') :-
+    phrase(immediate_bytes(byte, bool(false)), What),
+    What == [0].
+
+test('immediate_bytes: bool(true) from bytes') :-
+    phrase(immediate_bytes(byte, bool(What)), [1]),
+    What == true.
+
+test('immediate_bytes: bool(false) from bytes') :-
+    phrase(immediate_bytes(byte, bool(What)), [0]),
+    What == false.
 
 :- end_tests(hir_to_lir).
