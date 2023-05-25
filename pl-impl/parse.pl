@@ -6,26 +6,46 @@ parse(Nonterminal, Src) :-
     phrase(tokens(Ts), Src),
     phrase(Nonterminal, Ts).
 
-item(def(Name, Body, RetTy)) -->
-    [kw(def)], !, [id(Name), sym('[')],
-    [],
-    [sym(']'), sym(->), ty(RetTy), kw(do)],
+??(Msg) --> { true } ; { throw(error(Msg)) }.
+
+:- discontiguous item//1.
+
+item(def(Name, Params, RetTy, Body)) -->
+    [kw(def)], ??('expected valid function definition to follow `def`'),
+    [id(Name), sym('[')],
+    sequence(param, [sym(',')], Params),
+    [sym(']')],
+    optional(([sym(->)], ty(RetTy)), { RetTy = void }),
+    ??('expected `do`'),
+    [kw(do)],
     expr(Body),
-    [kw(end)].
+    [kw(end)],
+    !.
+
+param(param(Id, Ty)) -->
+    [id(Id)], ??('expected `: TYPE` to follow paramteter name'),
+    [sym(':')], ty(Ty), !.
 
 item(type(Name, Variants)) -->
-    [kw(type)], optional([kw(rec)], []), [id(Name)],
+    [kw(type)], ??('expected valid type definition to follow `type`'),
+    optional([kw(rec)], []), [id(Name)],
     sequence(variant_arm, Variants),
-    [kw(end)].
+    [kw(end)],
+    !.
 
 variant_arm(ctor(Name, Tys)) -->
-    [sym('|'), sym(:), id(Name)], !, sequence(ty, [sym(',')], Tys).
+    [sym('|'), sym(:), id(Name)], ??('expected comma separated list of types'),
+    sequence(ty, [sym(',')], Tys), !.
 variant_arm(supertype(Name)) --> [sym('|'), id(Name)].
 
-ty(prim(void)) --> [id('Void')].
-ty(prim(bool)) --> [id('Bool')].
-ty(prim(int)) --> [id('Int')].
-ty(prim(nat)) --> [id('Nat')].
+ty(void) --> [id('Void')], !.
+ty(bool) --> [id('Bool')], !.
+ty(int) --> [id('Int')], !.
+ty(nat) --> [id('Nat')], !.
+ty(fn(Params) -> RetTy) -->
+    [kw(fn)], !, [sym('[')],
+    sequence(ty, [sym(',')], Params),
+    [sym(']')], optional(([sym('->')], ty(RetTy)), { RetTy = void }).
 ty(alias(Name, Params)) -->
     [id(Name)],
     optional(
