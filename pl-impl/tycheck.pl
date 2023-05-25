@@ -37,6 +37,11 @@ ast_tast(let(X, Expr0), let(X, Expr :: Ty) :: void) -->
     define(X :: Ty).
 
 define(X :: Ty) --> state(Tcx0, [X :: Ty | Tcx0]).
+defining(Defs, Body) -->
+    state(Saved),
+    sequence([Name :: Ty]>>define(Name :: Ty), Defs),
+    Body,
+    state(_, Saved).
 
 ast_tast(seq(A0, B0), seq(A :: ATy, B :: BTy) :: BTy) -->
     state(St0),
@@ -59,17 +64,23 @@ ast_tast(intr(dbg_bool, Arg0), intr(dbg_bool, Arg :: bool) :: void) -->
     ast_tast(Arg0, Arg :: bool).
 
 ast_tast(lam(Param, Body0), lam(Param, Body) :: (ParamTy -> RetTy)) -->
-    state(St0),
-    define(Param :: ParamTy),
-    ast_tast(Body0, Body),
-    { Body = _ :: RetTy },
-    state(_, St0).
+    defining([Param :: ParamTy], (
+        ast_tast(Body0, Body),
+        { Body = _ :: RetTy }
+    )).
 
 ast_tast(call(Fn0, Arg0), call(Fn, Arg) :: RetTy) -->
     ast_tast(Fn0, Fn :: (ParamTy -> RetTy)),
     ast_tast(Arg0, Arg),
     { Arg = _ :: ArgTy },
     { ArgTy = ParamTy }.
+
+ast_tast(def(Name, Params, RetTy, Body0), def(Name, Params, RetTy, Body) :: _) -->
+    { maplist([param(X, Ty), (X :: Ty)]>>true, Params, Defs) },
+    defining(Defs, (
+        ast_tast(Body0, Body),
+        { Body = _ :: RetTy }
+    )).
 
 
 tycheck(Ast, Tast :: Ty, Tcx0) :-
