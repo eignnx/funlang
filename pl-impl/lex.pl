@@ -1,27 +1,45 @@
-:- module(lex, [tokens//1]).
+:- module(lex, [
+    tokens//1,
+    op(12, xfy, @)
+]).
 
 :- use_module(library(dcg/basics), [
     % csym//1, % WHY NO WORK??
     integer//1,
     string_without//2,
     string//1,
-    blanks//0,
     eos//0
 ]).
+
+:- op(12, xfy, @).
 
 :- set_prolog_flag(double_quotes, chars).
 :- current_prolog_flag(dialect, swi).
 :- current_prolog_flag(version_data, swi(9, _Minor, _Patch, _Extra)).
 
 
-tokens([T | Ts]) --> blanks, tok(T), !, tokens(Ts).
-tokens([]) --> blanks, eos.
+tokens(Ts) --> tokens(Ts, 1).
+
+tokens([T @ Line | Ts], Line0) -->
+    ws(NewLines),
+    tok(T),
+    !,
+    { Line is Line0 + NewLines },
+    tokens(Ts, Line).
+tokens([], _NLines) --> ws(_), eos.
+
+
+ws(NLs) --> ws_(0, NLs).
+
+ws_(NLs0, NLs) --> ([' '] | ['\t']), !, ws_(NLs0, NLs).
+ws_(NLs0, NLs) --> (['\n'] | ['\r', '\n']), !, { NLs1 is NLs0 + 1 }, ws_(NLs1, NLs).
+ws_(NLs,  NLs) --> [].
 
 tok( lit(nat(I)) ) --> integer(I), !.
 tok( lit(int(I)) ) --> (['-'] | ['+']), integer(I), !.
 tok( lit(bool(true)) ) --> atom(true), !.
 tok( lit(bool(false)) ) --> atom(false), !.
-tok( lit(text(Txt)) ) --> ['"'], !, string_without("\"", Txt), ['"'].
+tok( lit(text(Txt)) ) --> ['"'], !, string_without("\"\n", Txt), ['"'].
 tok( kw(Kw) ) --> { keyword(Kw) }, atom(Kw), !.
 tok( id(Id) ) --> csym(Id).
 tok( sym(Sym) ) --> { symbol(Sym) }, atom(Sym), !.

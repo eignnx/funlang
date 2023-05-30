@@ -1,58 +1,59 @@
+:- module(parse, [item//1, ty//1, expr//1]).
+
 :- use_module(library(dcg/high_order)).
-:- use_module(lex, [tokens//1]).
+:- use_module(lex, [tokens//1, op(12, xfy, @)]).
 :- set_prolog_flag(double_quotes, chars).
 
 parse(Nonterminal, Src) :-
     phrase(tokens(Ts), Src),
     phrase(Nonterminal, Ts).
 
-??(Msg) --> { true } ; { throw(error(Msg)) }.
+??(Msg, Line) --> { true } ; { throw(error(Msg, Line)) }.
 
 :- discontiguous item//1.
 
-item(def(Name, Params, RetTy, Body)) -->
-    [kw(def)], ??('expected valid function definition to follow `def`'),
-    [id(Name), sym('[')],
-    sequence(param, [sym(',')], Params),
-    [sym(']')],
-    optional(([sym(->)], ty(RetTy)), { RetTy = void }),
-    ??('expected `do`'),
-    [kw(do)],
+item(def{name:Name, params:Params, ret_ty:RetTy, body:Body}@Ln) -->
+    [kw(def)@Ln], %??('expected valid function definition to follow `def`', Ln),
+    [id(Name)@_, sym('[')@_],
+    sequence(param, [sym(',')@_], Params),
+    [sym(']')@_],
+    optional(([sym(->)@_], ty(RetTy)), { RetTy = void }),
+    [kw(do)@_],
     expr(Body),
-    [kw(end)],
+    [kw(end)@_],
     !.
 
-param(param(Id, Ty)) -->
-    [id(Id)], ??('expected `: TYPE` to follow paramteter name'),
-    [sym(':')], ty(Ty), !.
+param(param(Id, Ty)@Ln) -->
+    [id(Id)@Ln], ??('expected `: TYPE` to follow paramteter name', Ln),
+    [sym(':')@_], ty(Ty), !.
 
 item(type(Name, Variants)) -->
-    [kw(type)], ??('expected valid type definition to follow `type`'),
-    optional([kw(rec)], []), [id(Name)],
+    [kw(type)@Ln], ??('expected valid type definition to follow `type`', Ln),
+    optional([kw(rec)@_], []), [id(Name)@_],
     sequence(variant_arm, Variants),
-    [kw(end)],
+    [kw(end)@_],
     !.
 
-variant_arm(ctor(Name, Tys)) -->
-    [sym('|'), sym(:), id(Name)], ??('expected comma separated list of types'),
-    sequence(ty, [sym(',')], Tys), !.
-variant_arm(supertype(Name)) --> [sym('|'), id(Name)].
+variant_arm(ctor(Name, Tys)@Ln) -->
+    [sym('|')@_, sym(:)@_, id(Name)@Ln], ??('expected comma separated list of types', Ln),
+    sequence(ty, [sym(',')@_], Tys), !.
+variant_arm(supertype(Name)@Ln) --> [sym('|')@_, id(Name)@Ln].
 
-ty(void) --> [id('Void')], !.
-ty(bool) --> [id('Bool')], !.
-ty(int) --> [id('Int')], !.
-ty(nat) --> [id('Nat')], !.
+ty(void) --> [id('Void')@_], !.
+ty(bool) --> [id('Bool')@_], !.
+ty(int) --> [id('Int')@_], !.
+ty(nat) --> [id('Nat')@_], !.
 ty(fn(Params) -> RetTy) -->
-    [kw(fn)], !, [sym('[')],
-    sequence(ty, [sym(',')], Params),
-    [sym(']')], optional(([sym('->')], ty(RetTy)), { RetTy = void }).
+    [kw(fn)@_], !, [sym('[')@_],
+    sequence(ty, [sym(',')@_], Params),
+    [sym(']')@_], optional(([sym('->')@_], ty(RetTy)), { RetTy = void }).
 ty(alias(Name, Params)) -->
-    [id(Name)],
+    [id(Name)@_],
     optional(
         (
-            [sym('[')],
-            sequence(ty, [sym(',')], Params),
-            [sym(']')]
+            [sym('[')@_],
+            sequence(ty, [sym(',')@_], Params),
+            [sym(']')@_]
         ),
         { Params = [] }
     ).
@@ -68,9 +69,9 @@ lvl_op(3, '+'). lvl_op(3, '-'). lvl_op(3, '++').
 lvl_op(2, '*'). lvl_op(2, '/').
 lvl_op(1, '**'). lvl_op(1, '^').
 
-lvl_op(Lvl, Op) --> % To parse an operator of a certain level...
+lvl_op(Lvl, Op@Ln) --> % To parse an operator of a certain level...
     { lvl_op(Lvl, Op) }, % ...first find an op of the given level...
-    ( [sym(Op)] | [kw(Op)] ). % ...then try to parse it.
+    ( [sym(Op)@Ln] | [kw(Op)@Ln] ). % ...then try to parse it.
 
 max_deference_lvl(Lvl) :-
     lvl_op(Lvl, _), !. % Just find the first one listed.
@@ -83,9 +84,9 @@ expr_rec(Lvl, E) -->
     expr_rec_below(Lvl, E1), % First parse a term one level lower in the "operator deference" table.
     expr_rec_follow(Lvl, E1->E). % The, passing E1 as an argument to `..._follow`, parse the rest of the term.
 expr_rec_follow(Lvl, E1->E) -->
-    lvl_op(Lvl, Op), !, % Try to parse the operator itself. Commit if found.
+    lvl_op(Lvl, Op@Ln), !, % Try to parse the operator itself. Commit if found.
     expr_rec_below(Lvl, E2), % Parse a term one level lower in the "operator deference" table.
-    { E1E2 = binop(Op, E1, E2) }, % Construct the actual term.
+    { E1E2 = binop(Op, E1, E2)@Ln }, % Construct the actual term.
     expr_rec_follow(Lvl, E1E2->E). % Try to continue parsing at this level. (E1E2 would be used as the next E1).
 expr_rec_follow(_Lvl, E->E) --> []. % If you can't parse another term at this level, just yield what you've got.
 
@@ -96,40 +97,40 @@ expr_rec_below(Lvl, E) -->
 :- det(expr_norec//1).
 
 % An expression who's grammar rule does NOT contain left recursion.
-expr_norec(lit(int(I))) --> [lit(int(I))], !.
-expr_norec(lit(nat(I))) --> [lit(nat(I))], !.
-expr_norec(lit(bool(B))) --> [lit(bool(B))], !.
-expr_norec(if(Cond, Yes, No)) -->
-    [kw(if)], !, expr(Cond),
-    ( [kw(do)], ! | [kw(then)] ), expr(Yes),
-    [kw(else)], expr(No),
-    [kw(end)].
-expr_norec(let(X, Expr)) --> [kw(let)], !, [id(X), sym(=)], expr(Expr).
-expr_norec(var(X)) --> [id(X)], !.
-expr_norec(block(Expr)) --> [kw(do)], !, expr(Expr), [kw(end)].
-expr_norec(match(Scrut, Arms)) -->
-    [kw(match)], !,
+expr_norec(lit(int(I))@Ln) --> [lit(int(I))@Ln], !.
+expr_norec(lit(nat(I))@Ln) --> [lit(nat(I))@Ln], !.
+expr_norec(lit(bool(B))@Ln) --> [lit(bool(B))@Ln], !.
+expr_norec(if(Cond, Yes, No)@Ln) -->
+    [kw(if)@Ln], !, expr(Cond),
+    ( [kw(do)@_], ! | [kw(then)@_] ), expr(Yes),
+    [kw(else)@_], expr(No),
+    [kw(end)@_].
+expr_norec(let(X, Expr)@Ln) --> [kw(let)@Ln], !, [id(X)@_, sym(=)@_], expr(Expr), [sym(';')@_].
+expr_norec(var(X)@Ln) --> [id(X)@Ln], !.
+expr_norec(block(Expr)@Ln) --> [kw(do)@Ln], !, expr(Expr), [kw(end)@_].
+expr_norec(match(Scrut, Arms)@Ln) -->
+    [kw(match)@Ln], !,
     expr(Scrut),
     sequence(match_arm, Arms),
-    [kw(end)].
-expr_norec(Expr) --> [sym('(')], !, expr(Expr), [sym(')')].
-expr_norec(unop('-', Expr)) --> [sym('-')], !, expr(Expr).
-expr_norec(unop('!', Expr)) --> [sym('!')], !, expr(Expr).
-expr_norec(unop('~', Expr)) --> [sym('~')], !, expr(Expr).
+    [kw(end)@_].
+expr_norec(Expr) --> [sym('(')@_], !, expr(Expr), [sym(')')@_].
+expr_norec(unop('-', Expr)@Ln) --> [sym('-')@Ln], !, expr(Expr).
+expr_norec(unop('!', Expr)@Ln) --> [sym('!')@Ln], !, expr(Expr).
+expr_norec(unop('~', Expr)@Ln) --> [sym('~')@Ln], !, expr(Expr).
 
 
-match_arm(case(Pat, Expr)) -->
-    [sym('|')],
+match_arm(case(Pat, Expr)@Ln) -->
+    [sym('|')@Ln],
     pattern(Pat),
-    [sym(=>)],
+    [sym(=>)@_],
     expr(Expr).
 
-pattern(refut(variant(Name, Params))) -->
-    [sym('{'), sym(:)], !, [id(Name)],
-    sequence(pattern, [sym(',')], Params),
-    [sym('}')].
-pattern(refut(lit(Literal))) --> [lit(Literal)], !.
-pattern(var(Name)) --> [id(Name)].
+pattern(refut(variant(Name, Params))@Ln) -->
+    [sym('{')@Ln, sym(:)@_], !, [id(Name)@_],
+    sequence(pattern, [sym(',')@_], Params),
+    [sym('}')@_].
+pattern(refut(lit(Literal))@Ln) --> [lit(Literal)@Ln], !.
+pattern(irrefut(var(Name))@Ln) --> [id(Name)@Ln].
 
 /*
 phrase(expr(E),
