@@ -123,7 +123,8 @@ first_pass([], [], _) --> [].
 first_pass([label(Label), Instr | Hir], HirNoLabels, Index) --> !,
     [Label-Index], % Save the label-index pair...
     first_pass([Instr | Hir], HirNoLabels, Index). % ...process the rest as if the label wasn't there.
-first_pass([_Instr | Hir], HirNoLabels, Index) -->
+first_pass([Instr | Hir], [Instr | HirNoLabels], Index0) -->
+    { Index is Index0 + 1 },
     first_pass(Hir, HirNoLabels, Index).
 
     
