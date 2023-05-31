@@ -34,10 +34,10 @@ main([SrcFile]) :-
             phrase(hir_to_lir(Hir), Lir), % Lower HIR to LIR.
             format('lir: ~w~n', [Lir])
         ),
-        error(Err, Line),
+        error(Err, @(Ctx, Line)),
         (
             ansi_format([bold, fg(red)], 'Error[~a:~w]:~n', [SrcFile, Line]),
-            ansi_format([fg(white)], '~4|~t~w~n', [Err]),
+            ansi_format([fg(white)], '~4|~t~w, ~w~n', [Err, Ctx]),
             halt
         )
     ).

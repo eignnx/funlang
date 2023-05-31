@@ -1,9 +1,11 @@
 :- module(tycheck, [
     ast_tast//2,
+    tycheck/2,
     op(10, xfy, ::)
 ]).
 
-:- use_module(lex, op(120, xfy, @)).
+:- use_module(lex, [op(12, xfy, @)]).
+:- use_module(library(dcg/high_order), [sequence//2]).
 
 
 ty_err(Msg, Ctx) -->
@@ -12,41 +14,42 @@ ty_err(Msg, Ctx) -->
 :- discontiguous ast_tast//2.
 % :- det(ast_tast//2).
 
-ast_tast(lit(int(N))@_, lit(int(N)) :: int) --> [].
-ast_tast(lit(nat(N))@_, lit(nat(N)) :: nat) --> [].
+ast_tast(lit(int(N))@_, ::{tm: lit(int(N)), ty: int}) --> [].
+ast_tast(lit(nat(N))@_, ::{tm: lit(nat(N)), ty: nat}) --> [].
 
-ast_tast(lit(bool(B))@_, lit(bool(B)) :: bool) --> [].
+ast_tast(lit(bool(B))@_, ::{tm: lit(bool(B)), ty: bool}) --> [].
 
-ast_tast(lit(list(Xs0))@_, lit(list(Xs)) :: list(ElTy)) -->
+ast_tast(lit(list(Xs0))@_, ::{tm: lit(list(Xs)), ty: list(ElTy)}) -->
     lit_list_ast_tast(Xs0, Xs, ElTy).
 
-lit_list_ast_tast([], [], _NewTyVar)) --> [].
-lit_list_ast_tast([X0@Ln | Xs0], [X :: XTy | Xs], XTy) -->
-    ast_tast(X0@Ln, X :: XTy),
+lit_list_ast_tast([], [], _NewTyVar) --> [].
+lit_list_ast_tast([X0@Ln | Xs0], [X | Xs], X.ty) -->
+    ast_tast(X0@Ln, X),
     lit_list_ast_tast(Xs0, Xs, XsEleTy),
-    { XTy = XsEleTy } -> []
-        ; ty_err(list_ele_ty, X0@Ln\=Xs).
+    ({ X.ty = XsEleTy } -> []
+        ; ty_err(list_ele_ty, X0@Ln\=Xs)
+    ).
 
-ast_tast(binop(Op, A0, B0)@Ln, binop(Op, A :: T1, B :: T2) :: T3) -->
-    ast_tast(A0, A :: T1),
-    ast_tast(B0, B :: T2),
-    !,
-    { binop_sig(Op, T1->T2->T3) } -> []
-        ; ty_err(binop, Op@Ln).
+ast_tast(binop(Op, A0, B0)@Ln, ::{tm: binop(Op, A, B), ty: Ty}) -->
+    ast_tast(A0, A),
+    ast_tast(B0, B),
+    ({ binop_sig(Op, A.ty->B.ty->Ty) } -> []
+        ; ty_err(binop, Op@Ln)
+    ).
 
-ast_tast(unop(Op, E0)@Ln, unop(Op, E :: T1) :: T2) -->
-    ast_tast(E0, E :: T1),
-    !,
-    { unop_sig(Op, T1->T2) } -> []
-        ; ty_err(unop, Op@Ln).
+ast_tast(unop(Op, E0)@Ln, ::{tm: unop(Op, E), ty: Ty}) -->
+    ast_tast(E0, E),
+    ({ unop_sig(Op, E.ty->Ty) } -> []
+        ; ty_err(unop, Op@Ln)
+    ).
 
-ast_tast(var(X), var(X) :: Ty) --> var_ty(X, Ty).
+ast_tast(var(X), ::{tm: var(X), ty: Ty}) --> var_ty(X, Ty).
 
 var_ty(X, Ty) --> state(St), { memberchk(X :: Ty, St) }.
 
-ast_tast(let(X, Expr0)@_, let(X, Expr :: Ty) :: void) -->
-    ast_tast(Expr0, Expr :: Ty),
-    define(X :: Ty).
+ast_tast(let(X, Expr0)@_, ::{tm: let(X, Expr), ty: void}) -->
+    ast_tast(Expr0, Expr),
+    define(X :: Expr.ty).
 
 define(X :: Ty) --> state(Tcx0->[X :: Ty | Tcx0]).
 defining(Defs, Body) -->
@@ -55,64 +58,74 @@ defining(Defs, Body) -->
     Body,
     state(_->Saved).
 
-ast_tast(seq(A0, B0)@_, seq(A :: ATy, B :: BTy) :: BTy) -->
+ast_tast(seq(A0, B0)@_, ::{tm: seq(A, B), ty: B.ty}) -->
     state(St0),
-    ast_tast(A0, A :: ATy),
-    ast_tast(B0, B :: BTy),
+    ast_tast(A0, A),
+    ast_tast(B0, B),
     state(_->St0).
 
 state(S), [S] --> [S].
 state(S0->S), [S] --> [S0].
 
-ast_tast(if(Cond0, Yes0, No0)@Ln, if(Cond::bool, Yes::Ty, No::Ty) :: Ty) -->
-    ast_tast(Cond0, Cond :: CTy),
-    ({ CTy = bool } -> []
-        ; ty_err(if_cond_not_bool, CTy@Ln))
-    ast_tast(Yes0, Yes :: YTy),
-    ast_tast(No0, No :: NTy),
-    ({ YTy = NTy } -> []
-        ; ty_err(if_yes_no_mismatch, YTy\=NTy)).
+ast_tast(if(Cond0, Yes0, No0)@Ln, ::{tm: if(Cond, Yes, No), ty: Ty}) -->
+    ast_tast(Cond0, Cond),
+    ast_tast(Yes0, Yes),
+    ast_tast(No0, No),
+    ( { Cond.ty = bool, Yes.ty = Ty, No.ty = Ty } -> []
+        ; ty_err_if(Ln, Cond.ty, Yes.ty, No.ty)
+    ).
 
-ast_tast(intr(dbg_int, Arg0)@_, intr(dbg_int, Arg :: int) :: void) -->
-    ast_tast(Arg0, Arg :: int).
+ty_err_if(_Ln, bool, Ty, Ty) --> !.
+ty_err_if(Ln, bool, YTy, NTy) --> ty_err(if(yes_no_mismatch), (YTy\=NTy)@Ln), !.
+ty_err_if(Ln, NotBool, _, _) --> ty_err(if(cond_not_bool), (expected(bool)\=actual(NotBool))@Ln).
 
-ast_tast(intr(dbg_bool, Arg0)@_, intr(dbg_bool, Arg :: bool) :: void) -->
-    ast_tast(Arg0, Arg :: bool).
+ast_tast(intr(Intr, Arg0)@Ln, ::{tm: intr(Intr, Arg), ty: RetTy}) -->
+    ast_tast(Arg0, Arg),
+    { intr_sig(Intr, ArgTy->RetTy) },
+    ( { Arg.ty = ArgTy } -> []
+        ; ty_err(bad_arg_ty(Intr), (Arg.ty\=ArgTy)@Ln)
+    ).
 
-ast_tast(lam(Param, Body0)@_, lam(Param, Body) :: (ParamTy -> RetTy)) -->
-    defining([Param :: ParamTy], (
-        ast_tast(Body0, Body),
-        { Body = _ :: RetTy }
+ast_tast(lam(Params, Body0)@_, ::{tm: lam(Params, Body), ty: (fn(ParamTys) -> Body.ty)}) -->
+    { maplist([_Param, _FreshTyVar]>>true, Params, ParamTys) },
+    { maplist([Param, ParamTy, Param::ParamTy]>>true, Params, ParamTys, ParamsAndTys) },
+    defining(ParamsAndTys, (
+        ast_tast(Body0, Body)
     )).
 
-ast_tast(call(Fn0, Arg0)@Ln, call(Fn, Arg) :: RetTy) -->
+ast_tast(call(Fn0, Args0)@Ln, ::{tm: call(Fn, Args), ty: RetTy}) -->
     ast_tast(Fn0, Fn),
-    ast_tast(Arg0, Arg),
-    { Fn = _ :: (ParamTy -> RetTy) },
-    { Arg = _ :: ArgTy },
-    ( { ArgTy = ParamTy } -> []
-      ; ty_err(wrong_arg_ty, (expected(ParamTy)\=actual(ArgTy))@Ln)
+    dcg_maplist(ast_tast, Args0, Args),
+    { maplist([Arg, Arg.ty]>>true, Args, ArgTys) },
+    { Fn.ty = (fn(ParamTys) -> RetTy) },
+    ( { maplist(=, ArgTys, ParamTys) } -> []
+        ; ty_err(wrong_arg_ty, (expected(ParamTys)\=actual(ArgTys))@Ln)
     ).
+
+dcg_maplist(_Pred, [], [], S, S).
+dcg_maplist(Pred, [X|Xs], [Y|Ys], S0, S) :-
+    phrase(call(Pred, X, Y), S0, S1),
+    dcg_maplist(Pred, Xs, Ys, S1, S).
 
 ast_tast(
     def{name:Name, params:Params, ret_ty:RetTy, body:Body0}@Ln,
-    def{name:Name, params:Params, ret_ty:RetTy, body:Body} :: _
+    ::{tm: def{name:Name, params:Defs, ret_ty:RetTy, body:Body}, ty: _}
 ) -->
     { maplist([param(X, Ty)@_, (X :: Ty)]>>true, Params, Defs) },
     defining(Defs, (
         ast_tast(Body0, Body)
     )),
-    { _ :: BodyTy = Body },
-    ({ BodyTy = RetTy } -> []
-        ; ty_err(wrong_ret_ty, expected(RetTy)\=actual(BodyTy))).
+    ({ Body.ty = RetTy } -> []
+        ; ty_err(wrong_ret_ty, (expected(RetTy)\=actual(Body.ty))@Ln)
+    ).
 
 
-tycheck(Ast, Tast :: Ty, Tcx0) :-
-    phrase(ast_tast(Ast, Tast :: Ty), [_Tcx], [Tcx0]).
+tycheck(Ast, Tast, Tcx0) :-
+    phrase(ast_tast(Ast, Tast), [_Tcx], [Tcx0]).
 
-tycheck(Ast, Tast :: Ty) :-
+tycheck(Ast, Tast) :-
     inital_tcx(Tcx0),
-    tycheck(Ast, Tast :: Ty, Tcx0).
+    tycheck(Ast, Tast, Tcx0).
 
 inital_tcx([]).
 
@@ -132,3 +145,8 @@ binop_sig('**', Ty->nat->Ty) :- memberchk(Ty, [text, list(_), array(_)]).
 unop_sig('-', int->int).
 unop_sig('!', bool->bool).
 unop_sig('~', nat->nat). % TODO: Allow more types here?
+
+intr_sig(dbg_int, int->void).
+intr_sig(dbg_nat, nat->void).
+intr_sig(dbg_bool, bool->void).
+intr_sig(dbg_text, text->void).
