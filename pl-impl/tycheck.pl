@@ -5,13 +5,19 @@
 ]).
 
 :- use_module(lex, [op(12, xfy, @)]).
-:- use_module(library(dcg/high_order), [sequence//2]).
+:- use_module(utils, [
+    % dcg_maplist//3,
+    % dcg_maplist//2,
+    state//1,
+    op(950, xfx, before_after), before_after//2
+]).
 
 
 ty_err(Msg, Ctx) -->
     { throw(error(ty_err(Msg), Ctx)) }.
 
 :- discontiguous ast_tast//2.
+:- dynamic ast_tast//2.
 % :- det(ast_tast//2).
 
 ast_tast(lit(int(N))@_, ::{tm: lit(int(N)), ty: int}) --> [].
@@ -27,7 +33,7 @@ lit_list_ast_tast([X0@Ln | Xs0], [X | Xs], X.ty) -->
     ast_tast(X0@Ln, X),
     lit_list_ast_tast(Xs0, Xs, XsEleTy),
     ({ X.ty = XsEleTy } -> []
-        ; ty_err(list_ele_ty, X0@Ln\=Xs)
+        ; ty_err(list_ele_ty, (X0@Ln)\=Xs)
     ).
 
 ast_tast(binop(Op, A0, B0)@Ln, ::{tm: binop(Op, A, B), ty: Ty}) -->
@@ -51,21 +57,22 @@ ast_tast(let(X, Expr0)@_, ::{tm: let(X, Expr), ty: void}) -->
     ast_tast(Expr0, Expr),
     define(X :: Expr.ty).
 
-define(X :: Ty) --> state(Tcx0->[X :: Ty | Tcx0]).
+:- dynamic define//1.
+define(X :: Ty) --> Tcx0 before_after [X :: Ty | Tcx0].
+
+:- meta_predicate defining(+, //, ?, ?).
+
 defining(Defs, Body) -->
     state(Saved),
-    sequence([Name :: Ty]>>define(Name :: Ty), Defs),
+    dcg_maplist(define, Defs),
     Body,
-    state(_->Saved).
+    _ before_after Saved.
 
 ast_tast(seq(A0, B0)@_, ::{tm: seq(A, B), ty: B.ty}) -->
     state(St0),
     ast_tast(A0, A),
     ast_tast(B0, B),
-    state(_->St0).
-
-state(S), [S] --> [S].
-state(S0->S), [S] --> [S0].
+    _ before_after St0.
 
 ast_tast(if(Cond0, Yes0, No0)@Ln, ::{tm: if(Cond, Yes, No), ty: Ty}) -->
     ast_tast(Cond0, Cond),
@@ -101,11 +108,6 @@ ast_tast(call(Fn0, Args0)@Ln, ::{tm: call(Fn, Args), ty: RetTy}) -->
     ( { maplist(=, ArgTys, ParamTys) } -> []
         ; ty_err(wrong_arg_ty, (expected(ParamTys)\=actual(ArgTys))@Ln)
     ).
-
-dcg_maplist(_Pred, [], [], S, S).
-dcg_maplist(Pred, [X|Xs], [Y|Ys], S0, S) :-
-    phrase(call(Pred, X, Y), S0, S1),
-    dcg_maplist(Pred, Xs, Ys, S1, S).
 
 ast_tast(
     def{name:Name, params:Params, ret_ty:RetTy, body:Body0}@Ln,
@@ -150,3 +152,24 @@ intr_sig(dbg_int, int->void).
 intr_sig(dbg_nat, nat->void).
 intr_sig(dbg_bool, bool->void).
 intr_sig(dbg_text, text->void).
+
+
+%%%%%%%%%%%%%%%%%%%%%% UTILS
+
+:- meta_predicate
+    dcg_maplist(//, ?, ?, ?, ?),
+    dcg_maplist(//, ?, ?, ?).
+
+%% dcg_maplist(+Arity1DcgBody, ?List)//.
+%
+dcg_maplist(_Pred, [], S, S).
+dcg_maplist(Pred, [X|Xs], S0, S) :-
+    call(Pred, X, S0, S1),
+    dcg_maplist(Pred, Xs, S1, S).
+
+%% dcg_maplist(+Arity2DcgBody, ?List1, ?List2)//.
+%
+dcg_maplist(_Pred, [], [], S, S).
+dcg_maplist(Pred, [X|Xs], [Y|Ys], S0, S) :-
+    call(Pred, X, Y, S0, S1),
+    dcg_maplist(Pred, Xs, Ys, S1, S).

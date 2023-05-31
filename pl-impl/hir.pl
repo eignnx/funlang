@@ -20,6 +20,7 @@ hir_instr(+jmp_if_false(jmp_tgt(_))).
 hir_instr(+call(_NArgs__Byte, label(_))).
 hir_instr(+call_indirect(_NArgs__Byte)).
 hir_instr(+syscall(_N)).
+hir_instr(+label(_)).
 hir_instr(-halt). hir_instr(-nop).
 hir_instr(-add(nat)). hir_instr(-add(int)).
 hir_instr(-sub(nat)). hir_instr(-sub(int)).

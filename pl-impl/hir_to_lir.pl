@@ -1,6 +1,5 @@
 :- module(hir_to_lir, [
     hir_to_lir//1,
-    lir//1,
     lir_instr/1,
     immediate_bytes//2
 ]).
@@ -9,6 +8,14 @@
 :- use_module(serde, [unsigned_bytes//2, signed_bytes//2]).
 :- use_module(hir, [hir_instr/1, hir_instr_annotated/2]).
 :- use_module(ty, [type_size/2]).
+:- use_module(utils, [
+    dupkeypairs_to_assoc/2,
+    op(1050, xfy, else),
+    else/2
+]).
+
+:- use_module(library(assoc)).
+
 
 lir_instr(halt). lir_instr(nop).
 lir_instr(const(byte)).
@@ -62,48 +69,69 @@ byte_bool(0, false).
 byte_bool(1, true).
 
 
-lir(+const(MemSpec, Imm)) -->
+%% lir(?AnnotatedHirInstruction, +LabelIndexAssoc)//.
+%
+lir(+const(MemSpec, Imm), _) -->
 	opcode(const(MemSpec)),
 	immediate_bytes(MemSpec, Imm).
-lir(+load(Local :: Ty)) -->
+lir(+load(Local :: Ty), _) -->
 	{ type_size(Ty, NBytes) },
 	opcode(load_local),
 	unsigned_bytes(short, NBytes),
 	immediate_bytes(short, Local).
-lir(+store(Local :: Ty)) -->
+lir(+store(Local :: Ty), _) -->
 	{ type_size(Ty, NBytes) },
 	opcode(store_local),
 	unsigned_bytes(short, NBytes),
 	immediate_bytes(short, Local).
-lir(+jmp(Label)) -->
+
+lir(+jmp(Label), LabelAssoc) -->
+    { get_assoc(Label, LabelAssoc, Index) else throw(error(unknown_key_in_assoc(Label), _)) },
     opcode(jmp),
-    unsigned_bytes(word, Label).
-lir(+jmp_if_false(Label)) -->
+    unsigned_bytes(word, Index).
+lir(+jmp_if_false(Label), LabelAssoc) -->
+    { get_assoc(Label, LabelAssoc, Index) else throw(error(unknown_key_in_assoc(Label), _)) },
     opcode(jmp_if_false),
-    unsigned_bytes(word, Label).
-lir(+call(NArgs, Label)) -->
+    unsigned_bytes(word, Index).
+lir(+call(NArgs, Label), LabelAssoc) -->
+    { get_assoc(Label, LabelAssoc, Index) else throw(error(unknown_key_in_assoc(Label), _)) },
     opcode(call),
     unsigned_bytes(byte, NArgs),
-    unsigned_bytes(word, Label).
-lir(+call_indirect(NArgs)) -->
+    unsigned_bytes(word, Index).
+
+lir(+call_indirect(NArgs), _) -->
     opcode(call_indirect),
     unsigned_bytes(byte, NArgs).
-lir(+syscall(N)) -->
+lir(+syscall(N), _) -->
     opcode(syscall),
     unsigned_bytes(short, N).
-lir(+pop(NBytes)) -->
+lir(+pop(NBytes), _) -->
     opcode(pop),
     unsigned_bytes(short, NBytes).
 
-lir(-Instr) --> opcode(Instr).
+lir(-Instr, _) --> opcode(Instr).
     
 opcode(Instr) --> [OpCode], { lir_instr_opcode(Instr, OpCode) }.
 
-hir_to_lir([]) --> [].
-hir_to_lir([Hir | Hirs]) -->
+
+hir_to_lir(Hir) -->
+    { phrase(first_pass(Hir, HirNoLabels, 0), LabelPairs) },
+    { dupkeypairs_to_assoc(LabelPairs, LabelAssoc) },
+    second_pass(HirNoLabels, LabelAssoc).
+
+first_pass([], [], _) --> [].
+first_pass([label(Label), Instr | Hir], HirNoLabels, Index) --> !,
+    [Label-Index], % Save the label-index pair...
+    first_pass([Instr | Hir], HirNoLabels, Index). % ...process the rest as if the label wasn't there.
+first_pass([_Instr | Hir], HirNoLabels, Index) -->
+    first_pass(Hir, HirNoLabels, Index).
+
+    
+second_pass([], _LabelAssoc) --> [].
+second_pass([Hir | Hirs], LabelAssoc) -->
     { hir_instr_annotated(Hir, HirAnn) },
-    lir(HirAnn),
-    hir_to_lir(Hirs).
+    lir(HirAnn, LabelAssoc),
+    second_pass(Hirs, LabelAssoc).
 
 :- use_module(library(plunit)).
 :- begin_tests(hir_to_lir).

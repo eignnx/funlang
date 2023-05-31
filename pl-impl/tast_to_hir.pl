@@ -1,36 +1,37 @@
 :- module(tast_to_hir, [hir//1]).
-:- use_module(tycheck, [
-    op(10, xfy, ::)
-]).
 :- use_module(ty, [type_size/2]).
 
-:- det(hir//1).
+:- op(10, xfy, ::).
 
-hir(lit(int(I)) :: _) --> [const(qword, int(I))].
-hir(lit(nat(I)) :: _) --> [const(qword, nat(I))].
-hir(lit(bool(B)) :: _) --> [const(byte, bool(B))].
+hir(::{tm:Tm, ty:Ty}) --> hir_(Tm::Ty).
 
-hir(binop(+, A, B) :: Ty) --> hir(A), hir(B), [add(Ty)].
-hir(binop(-, A, B) :: Ty) --> hir(A), hir(B), [sub(Ty)].
-hir(binop(*, A, B) :: Ty) --> hir(A), hir(B), [mul(Ty)].
-hir(binop(/, A, B) :: Ty) --> hir(A), hir(B), [div(Ty)].
-hir(binop(and, A, B) :: _) --> hir(A), hir(B), [and].
-hir(binop(or, A, B) :: _) --> hir(A), hir(B), [or].
-hir(binop(xor, A, B) :: _) --> hir(A), hir(B), [over, over, or, rot, rot, and, not, and].
-hir(binop('>', A, B) :: Ty) --> hir(A), hir(B), [gt(Ty)].
-hir(binop('<', A, B) :: Ty) --> hir(A), hir(B), [lt(Ty)].
-hir(binop('==', A, B) :: _) --> hir(A), hir(B), [eq].
-hir(binop('!=', A, B) :: _) --> hir(A), hir(B), [eq, not].
-hir(binop('>=', A, B) :: Ty) --> hir(A), hir(B), [over, over, gt(Ty), eq, or].
-hir(binop('<=', A, B) :: Ty) --> hir(A), hir(B), [over, over, lt(Ty), eq, or].
+:- det(hir_//1).
 
-hir(let(X, Expr :: Ty) :: _) -->
+hir_(lit(int(I)) :: _) --> [const(qword, int(I))].
+hir_(lit(nat(I)) :: _) --> [const(qword, nat(I))].
+hir_(lit(bool(B)) :: _) --> [const(byte, bool(B))].
+
+hir_(binop(+, A, B) :: Ty) --> hir(A), hir(B), [add(Ty)].
+hir_(binop(-, A, B) :: Ty) --> hir(A), hir(B), [sub(Ty)].
+hir_(binop(*, A, B) :: Ty) --> hir(A), hir(B), [mul(Ty)].
+hir_(binop(/, A, B) :: Ty) --> hir(A), hir(B), [div(Ty)].
+hir_(binop(and, A, B) :: _) --> hir(A), hir(B), [and].
+hir_(binop(or, A, B) :: _) --> hir(A), hir(B), [or].
+hir_(binop(xor, A, B) :: _) --> hir(A), hir(B), [over, over, or, rot, rot, and, not, and].
+hir_(binop('>', A, B) :: Ty) --> hir(A), hir(B), [gt(Ty)].
+hir_(binop('<', A, B) :: Ty) --> hir(A), hir(B), [lt(Ty)].
+hir_(binop('==', A, B) :: _) --> hir(A), hir(B), [eq].
+hir_(binop('!=', A, B) :: _) --> hir(A), hir(B), [eq, not].
+hir_(binop('>=', A, B) :: Ty) --> hir(A), hir(B), [over, over, gt(Ty), eq, or].
+hir_(binop('<=', A, B) :: Ty) --> hir(A), hir(B), [over, over, lt(Ty), eq, or].
+
+hir_(let(X, Expr :: Ty) :: _) -->
     hir(Expr :: Ty),
     [store(local(X) :: Ty)].
 
-hir(var(X) :: Ty) --> [load(local(X) :: Ty)].
+hir_(var(X) :: Ty) --> [load(local(X) :: Ty)].
 
-hir(if(Cond, Yes, No) :: _) -->
+hir_(if(Cond, Yes, No) :: _) -->
     hir(Cond),
     [jmp_if_false(jmp_tgt(Else))],
     hir(Yes),
@@ -39,8 +40,13 @@ hir(if(Cond, Yes, No) :: _) -->
     hir(No),
     [label(End)].
 
-hir(seq(A, B) :: _) -->
+hir_(seq(A, B) :: _) -->
     hir(A),
     { A = _ :: ATy, type_size(ATy, NBytes) },
     ( { NBytes =:= 0 } -> [] ; [pop(NBytes)] ),
     hir(B).
+
+hir_(def{name:Name, params:_Params, ret_ty:_RetTy, body:Body} :: _) -->
+    [label(Name)],
+    hir(Body),
+    [ret].
