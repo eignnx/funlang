@@ -1,5 +1,5 @@
 :- module(hir_to_lir, [
-    hir_to_lir//1,
+    hir_to_lir//0,
     lir_instr/1,
     immediate_bytes//2
 ]).
@@ -9,10 +9,13 @@
 :- use_module(hir, [hir_instr/1, hir_instr_annotated/2]).
 :- use_module(ty, [type_size/2]).
 :- use_module(utils, [
+    dcg_maplist//2,
+    dcg_maplist//3,
     dupkeypairs_to_assoc/2,
     op(1050, xfy, else),
     else/2
 ]).
+:- use_module(tast_to_hir, [item_name_value/2]).
 
 :- use_module(library(assoc)).
 
@@ -80,16 +83,16 @@ gen_id(Scope, Symbol, NewId) :-
 
 %% lir(?AnnotatedHirInstruction, +CurrentScope)//.
 %
-lir(+const(MemSpec, Imm), _) -->
+lir(+const(MemSpec, Imm), _, _) -->
 	opcode(const(MemSpec)),
 	immediate_bytes(MemSpec, Imm).
-lir(+load(Local :: Ty), CurrentScope) -->
+lir(+load(Local :: Ty), _, CurrentScope) -->
 	{ type_size(Ty, NBytes) },
 	opcode(load_local),
 	unsigned_bytes(short, NBytes),
     { gen_id(CurrentScope, Local, Id) },
 	immediate_bytes(short, Id).
-lir(+store(Local :: Ty), CurrentScope) -->
+lir(+store(Local :: Ty), _, CurrentScope) -->
 	{ type_size(Ty, NBytes) },
 	opcode(store_local),
 	unsigned_bytes(short, NBytes),
@@ -110,31 +113,31 @@ lir(+call(NArgs, Label), LabelAssoc, _) -->
     unsigned_bytes(byte, NArgs),
     unsigned_bytes(word, Index).
 
-lir(+call_indirect(NArgs), _) -->
+lir(+call_indirect(NArgs), _, _) -->
     opcode(call_indirect),
     unsigned_bytes(byte, NArgs).
-lir(+syscall(N), _) -->
+lir(+syscall(N), _, _) -->
     opcode(syscall),
     unsigned_bytes(short, N).
-lir(+pop(NBytes), _) -->
+lir(+pop(NBytes), _, _) -->
     opcode(pop),
     unsigned_bytes(short, NBytes).
 
-lir(-Instr, _) --> opcode(Instr).
+lir(-Instr, _, _) --> opcode(Instr).
     
 opcode(Instr) --> [OpCode], { lir_instr_opcode(Instr, OpCode) }.
 
 
-%! hir_to_lir(Hir)//
+%! hir_to_lir//
 %
 % @see ./hir_to_lir.md for high-level overview of the translation process here.
 hir_to_lir -->
     { findall(Name-Value, item_name_value(Name, Value), NamesValues) },
     { pairs_keys_values(NamesValues, Names, Values) },
-    dgc_maplist(gen_lir, Names, Values).
+    dcg_maplist(gen_lir, Names, Values).
 
 gen_lir(FnName, hir(Hir)) -->
-    dgc_maplist([Instr]>>lir(Instr, _, FnName)).
+    dcg_maplist([Instr]>>lir(Instr, _, FnName), Hir).
 
 gen_lir(_StaticName, static_text(Text)) -->
     text_to_bytes(Text).
@@ -149,33 +152,33 @@ text_to_bytes(Text) -->
     % second_pass(HirNoLabels, SymbolRecords).
 
 
-first_pass([], [], _) --> [].
+% first_pass([], [], _) --> [].
 
-first_pass([label(Label), Instr | Hir], HirNoLabels, Index) --> !,
-    [Label-Index], % Save the label-index pair...
-    { var(Label) -> gensym(lbl_, UniqSym), Label = UniqSym ; true },
-    first_pass([Instr | Hir], HirNoLabels, Index). % ...process the rest as if the label wasn't there.
+% first_pass([label(Label), Instr | Hir], HirNoLabels, Index) --> !,
+%     [Label-Index], % Save the label-index pair...
+%     { var(Label) -> gensym(lbl_, UniqSym), Label = UniqSym ; true },
+%     first_pass([Instr | Hir], HirNoLabels, Index). % ...process the rest as if the label wasn't there.
 
-first_pass([const(ptr, static_text(Text)) | Hir], HirNoLabels, Index0) --> !,
-    { gensym('$static_text_', UniqSym) },
-    [UniqSym-TextStart],
-    { Index is Index0 + 1 },
-    first_pass([const(qword, nat(TextStart)) | Hir], HirNoLabels0, Index),
-    { length(HirNoLabels0, TextStart) },
-    { maplist([Char, #(Code)]>>char_code(Char, Code), Text, Codes) },
-    { append(HirNoLabels0, Codes, HirNoLabels) }.
+% first_pass([const(ptr, static_text(Text)) | Hir], HirNoLabels, Index0) --> !,
+%     { gensym('$static_text_', UniqSym) },
+%     [UniqSym-TextStart],
+%     { Index is Index0 + 1 },
+%     first_pass([const(qword, nat(TextStart)) | Hir], HirNoLabels0, Index),
+%     { length(HirNoLabels0, TextStart) },
+%     { maplist([Char, #(Code)]>>char_code(Char, Code), Text, Codes) },
+%     { append(HirNoLabels0, Codes, HirNoLabels) }.
 
-first_pass([Instr | Hir], [Instr | HirNoLabels], Index0) -->
-    { Index is Index0 + 1 },
-    first_pass(Hir, HirNoLabels, Index).
+% first_pass([Instr | Hir], [Instr | HirNoLabels], Index0) -->
+%     { Index is Index0 + 1 },
+%     first_pass(Hir, HirNoLabels, Index).
 
     
-second_pass([], _LabelAssoc) --> [].
-second_pass([#(Code) | Hirs], LabelAssoc) --> !, [Code], second_pass(Hirs, LabelAssoc).
-second_pass([Hir | Hirs], LabelAssoc) -->
-    { hir_instr_annotated(Hir, HirAnn) },
-    lir(HirAnn, LabelAssoc),
-    second_pass(Hirs, LabelAssoc).
+% second_pass([], _LabelAssoc) --> [].
+% second_pass([#(Code) | Hirs], LabelAssoc) --> !, [Code], second_pass(Hirs, LabelAssoc).
+% second_pass([Hir | Hirs], LabelAssoc) -->
+%     { hir_instr_annotated(Hir, HirAnn) },
+%     lir(HirAnn, LabelAssoc),
+%     second_pass(Hirs, LabelAssoc).
 
 :- use_module(library(plunit)).
 :- begin_tests(hir_to_lir).

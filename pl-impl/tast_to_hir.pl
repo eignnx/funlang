@@ -1,7 +1,11 @@
-:- module(tast_to_hir, [hir//1]).
+:- module(tast_to_hir, [
+    gen_hir_from_items/1,
+    item_name_value/2
+]).
+
 :- use_module(ty, [type_size/2]).
 :- use_module(hir, [syscall_number/2]).
-:- use_module(utils, [dcg_maplist/4, dcg_maplist/5]).
+:- use_module(utils, [dcg_maplist//2, dcg_maplist//3]).
 
 :- op(10, xfy, ::).
 
@@ -29,7 +33,7 @@ hir_(lit(text(Txt)) :: _) -->
 hir_(lit(tuple(Es)) :: TupleTy) -->
     [alloc(sizeof(TupleTy))],
     { length(Es, N), numlist(0, N, LogicalIndices) },
-    utils:dgc_maplist(hir_tuple_field, Es, LogicalIndices).
+    dcg_maplist(hir_tuple_field, Es, LogicalIndices).
 
 hir_tuple_field(Expr, LogicalIndex) -->
     hir(Expr), % Compute the value to be written: [Val, Ptr | Rest]
@@ -114,7 +118,7 @@ hir_(call(Fn, Args) :: _) -->
     { FnLbl = ?????? },
     [call_direct(FnLbl, ArgC)].
 
-item_hir(def{name:Name, params:_Params, ret_ty:_RetTy, body:Body} :: _) :-
+gen_hir_from_item(def{name:Name, params:_Params, ret_ty:_RetTy, body:Body} :: _) :-
     phrase((
         [label(Name)],
         hir(Body),
@@ -122,3 +126,7 @@ item_hir(def{name:Name, params:_Params, ret_ty:_RetTy, body:Body} :: _) :-
     ), BodyHir),
     assertz( item_name_value(Name, hir(BodyHir)) ).
 
+gen_hir_from_items([]).
+gen_hir_from_items([Item | Items]) :-
+    gen_hir_from_item(Item),
+    gen_hir_from_items(Items).

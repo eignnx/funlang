@@ -6,7 +6,7 @@
 
 :- use_module(lex, [op(12, xfy, @)]).
 :- use_module(utils, [
-    dcg_maplist1//2,
+    dcg_maplist//2,
     dcg_maplist//3,
     state//1,
     op(950, xfx, before_after), before_after//2
@@ -27,7 +27,7 @@ ast_tast(lit(bool(B))@_, ::{tm: lit(bool(B)), ty: bool}) --> [].
 ast_tast(lit(text(T))@_, ::{tm: lit(text(T)), ty: text}) --> [].
 
 ast_tast(lit(variant(Head, Args0))@_, ::{tm: lit(variant(Head, Args)), ty: variant(Head, Tys)}) -->
-    utils:dcg_maplist(ast_tast, Args0, Args),
+    dcg_maplist(ast_tast, Args0, Args),
     { maplist([A, A.ty]>>true, Args, Tys) }.
 
 ast_tast(lit(tuple(Es0))@_, ::{tm: lit(tuple(Es)), ty: tuple(Tys)}) -->
@@ -64,7 +64,7 @@ var_ty(X, Ty) --> state(St), { memberchk(X :: Ty, St) }.
 
 defining(Defs, Body) -->
     state(Saved),
-    dcg_maplist1(define, Defs),
+    dcg_maplist(define, Defs),
     Body,
     _ before_after Saved.
 

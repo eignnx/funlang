@@ -2,12 +2,13 @@
 
 :- use_module(lex, [tokens//1]).
 :- use_module(parse, [item//1]).
-:- use_module(tycheck, [tycheck/2]).
-:- use_module(tast_to_hir, [hir//1]).
-:- use_module(hir_to_lir, [hir_to_lir//1]).
+:- use_module(tycheck, [typecheck/2]).
+:- use_module(tast_to_hir, [gen_hir_from_items/1]).
+:- use_module(hir_to_lir, [hir_to_lir//0]).
 
 :- use_module(library(pio), [phrase_from_file/2]).
 :- use_module(library(listing), [portray_clause/1]).
+:- use_module(library(dcg/high_order), [sequence//2]).
 
 
 main_([SrcFile]) :-
@@ -16,18 +17,18 @@ main_([SrcFile]) :-
         (
             tokens_from_file(Tokens, SrcFile),
             format('Tokens = '), portray_clause(Tokens),
-            phrase(item(Item), Tokens), % Parse an `item` from the token stream.
-            format('Ast = '), portray_clause(Item),
+            phrase(sequence(item, Items), Tokens), % Parse `items` from the token stream.
+            format('Items = '), portray_clause(Item),
             (
-                tycheck(Item, Tast) -> % Do typechecking to produce a typed AST.
-                    format('Tast = '), portray_clause(Tast)
+                maplist(typecheck, Items, Tasts) -> % Do typechecking to produce a typed AST.
+                    format('Tasts = '), portray_clause(Tasts)
                 ;
                     Item = @(_, Ln),
                     throw(error('Typechecking failed!', Ln))
             ),
-            phrase(item_hir(Tast), Hir), % Lower the TAST to HIR.
-            format('Hir = '), portray_clause(Hir),
-            phrase(hir_to_lir(Hir), Lir), % Lower HIR to LIR.
+            gen_hir_from_items(Tasts), % Lower the TAST to HIR.
+            % format('Hir = '), portray_clause(Hir),
+            phrase(hir_to_lir, Lir), % Lower HIR to LIR.
             format('Lir = '), portray_clause(Lir)
         ),
         error(ty_err(Err), @(Description, Line)),
