@@ -1,29 +1,78 @@
 :- module(tast_to_hir, [hir//1]).
 :- use_module(ty, [type_size/2]).
+:- use_module(hir, [syscall_number/2]).
+:- use_module(utils, [dcg_maplist/4, dcg_maplist/5]).
 
 :- op(10, xfy, ::).
 
+% Facts for `item_name_value` will be asserted during HIR generation.
+:- dynamic item_name_value/2.
+
+%! hir(+TmTyDict)//
+%
+% @see ./hir.md for high-level details about this translation.
 hir(::{tm:Tm, ty:Ty}) --> hir_(Tm::Ty).
 
 :- det(hir_//1).
+:- discontiguous hir_//1.
 
 hir_(lit(int(I)) :: _) --> [const(qword, int(I))].
 hir_(lit(nat(I)) :: _) --> [const(qword, nat(I))].
 hir_(lit(bool(B)) :: _) --> [const(byte, bool(B))].
+hir_(lit(text(Txt)) :: _) -->
+    { gensym('$static_text_', Lbl) },
+    [const(ptr, static_text(Lbl))],
+    { length(Txt, Len) },
+    [const(qword, nat(Len))],
+    { assertz( item_name_value(Lbl, static_text(Txt)) ) }.
 
-hir_(binop(+, A, B) :: Ty) --> hir(A), hir(B), [add(Ty)].
-hir_(binop(-, A, B) :: Ty) --> hir(A), hir(B), [sub(Ty)].
-hir_(binop(*, A, B) :: Ty) --> hir(A), hir(B), [mul(Ty)].
-hir_(binop(/, A, B) :: Ty) --> hir(A), hir(B), [div(Ty)].
-hir_(binop(and, A, B) :: _) --> hir(A), hir(B), [and].
-hir_(binop(or, A, B) :: _) --> hir(A), hir(B), [or].
-hir_(binop(xor, A, B) :: _) --> hir(A), hir(B), [over, over, or, rot, rot, and, not, and].
-hir_(binop('>', A, B) :: Ty) --> hir(A), hir(B), [gt(Ty)].
-hir_(binop('<', A, B) :: Ty) --> hir(A), hir(B), [lt(Ty)].
-hir_(binop('==', A, B) :: _) --> hir(A), hir(B), [eq].
-hir_(binop('!=', A, B) :: _) --> hir(A), hir(B), [eq, not].
+hir_(lit(tuple(Es)) :: TupleTy) -->
+    [alloc(sizeof(TupleTy))],
+    { length(Es, N), numlist(0, N, LogicalIndices) },
+    utils:dgc_maplist(hir_tuple_field, Es, LogicalIndices).
+
+hir_tuple_field(Expr, LogicalIndex) -->
+    hir(Expr), % Compute the value to be written: [Val, Ptr | Rest]
+    [mem_write_direct(LogicalIndex)]. % Write the bytes on the stack: [Ptr | Rest]
+
+hir_(lit(variant(_Head, Args)) :: VariantTy) -->
+    { maplist([Arg, Arg.ty]>>true, Args, ArgTys) },
+
+    % { maplist(\($2 = ($1).ty), Args, ArgTys) },
+    % { maplist(+(+2 = (+1).ty), Args, ArgTys) },
+    % { maplist(*(*2 = (*1).ty), Args, ArgTys) },
+    % { maplist(?(?2 = (?1).ty), Args, ArgTys) },
+    % { maplist(~(~2 = (~1).ty), Args, ArgTys) },
+    % { maplist(^(^2 = (^1).ty), Args, ArgTys) },
+    % { maplist(&(&2 = (&1).ty), Args, ArgTys) },
+    % { maplist(@(@2 = (@1).ty), Args, ArgTys) },
+    % { maplist($($2 = ($1).ty), Args, ArgTys) },
+    % { maplist((#2 = (#1).ty)&, Args, ArgTys) },
+
+    { TupleTy  = [discr(VariantTy)      | ArgTys] },
+    { TupleVal = [discr(VariantTy) :: _ |   Args] },
+    hir_(lit(tuple(TupleVal)) :: TupleTy).
+
+hir_(discr(VariantTy) :: _) --> [gen_discr(VariantTy)].
+
+hir_(binop(+,    A, B) :: Ty) --> hir(A), hir(B), [add(Ty)].
+hir_(binop(-,    A, B) :: Ty) --> hir(A), hir(B), [sub(Ty)].
+hir_(binop(*,    A, B) :: Ty) --> hir(A), hir(B), [mul(Ty)].
+hir_(binop(/,    A, B) :: Ty) --> hir(A), hir(B), [div(Ty)].
+hir_(binop(and,  A, B) ::  _) --> hir(A), hir(B), [and].
+hir_(binop(or,   A, B) ::  _) --> hir(A), hir(B), [or].
+hir_(binop(xor,  A, B) ::  _) --> hir(A), hir(B), [over, over, or, rot, rot, and, not, and].
+hir_(binop('>',  A, B) :: Ty) --> hir(A), hir(B), [gt(Ty)].
+hir_(binop('<',  A, B) :: Ty) --> hir(A), hir(B), [lt(Ty)].
+hir_(binop('==', A, B) ::  _) --> hir(A), hir(B), [eq].
+hir_(binop('!=', A, B) ::  _) --> hir(A), hir(B), [eq, not].
 hir_(binop('>=', A, B) :: Ty) --> hir(A), hir(B), [over, over, gt(Ty), eq, or].
 hir_(binop('<=', A, B) :: Ty) --> hir(A), hir(B), [over, over, lt(Ty), eq, or].
+
+hir_(unop(not, E) :: _) --> hir(E), [not].
+hir_(unop('-', E) :: _) --> hir(E), [neg(E.ty)].
+hir_(unop('~', E) :: _) --> hir(E), [invert_bits(E.ty)].
+hir_(unop(tuple_proj(Idx), E) :: _) --> hir(E), [mem_read_direct(Idx)].
 
 hir_(let(X, Expr :: Ty) :: _) -->
     hir(Expr :: Ty),
@@ -31,7 +80,14 @@ hir_(let(X, Expr :: Ty) :: _) -->
 
 hir_(var(X) :: Ty) --> [load(local(X) :: Ty)].
 
+hir_(intr(Intr, Arg) :: _) -->
+    hir(Arg),
+    { syscall_number(Intr, N) },
+    [syscall(N)].
+
 hir_(if(Cond, Yes, No) :: _) -->
+    { gensym('$if_end_', End) },
+    { gensym('$if_else_', Else) },
     hir(Cond),
     [jmp_if_false(jmp_tgt(Else))],
     hir(Yes),
@@ -46,7 +102,23 @@ hir_(seq(A, B) :: _) -->
     ( { NBytes =:= 0 } -> [] ; [pop(NBytes)] ),
     hir(B).
 
-hir_(def{name:Name, params:_Params, ret_ty:_RetTy, body:Body} :: _) -->
-    [label(Name)],
-    hir(Body),
-    [ret].
+hir_([] :: _) --> [].
+hir_([E | Es] :: _) -->
+    hir(E),
+    hir(Es :: _).
+
+hir_(call(Fn, Args) :: _) -->
+    hir(Args :: _),
+    hir(Fn),
+    { length(ArgC, Args) },
+    { FnLbl = ?????? },
+    [call_direct(FnLbl, ArgC)].
+
+item_hir(def{name:Name, params:_Params, ret_ty:_RetTy, body:Body} :: _) :-
+    phrase((
+        [label(Name)],
+        hir(Body),
+        [ret]
+    ), BodyHir),
+    assertz( item_name_value(Name, hir(BodyHir)) ).
+

@@ -2,15 +2,12 @@
     [ statefully/2
     , state//1
     , op(950, xfx, before_after), before_after//2
-    % , dcg_maplist//3
-    % , dcg_maplist//2
+    , dcg_maplist1//2
+    , dcg_maplist//3
     , dupkeypairs_to_assoc/2
     , op(1050, xfy, else), else/2
     ]
 ).
-
-:- op(950, xfx, before_after).
-:- op(1050, xfy, else).
 
 %% statefully(+DcgBody, ?InitialState -> ?FinalState).
 %
@@ -38,3 +35,29 @@ dupkeypairs_to_assoc(DupKeyPairs, Assoc) :-
 
 (Goal else Alternative) :-
     call(Goal) *-> true ; call(Alternative).
+
+
+:- non_terminal(dcg_maplist1//2).
+
+%% dcg_maplist1(+Arity1DcgBody, ?List)//.
+%
+dcg_maplist1(DcgBody, Xs, S, S0) :-
+    dcg_maplist1_(Xs, S, S0, DcgBody).
+
+dcg_maplist1_([], S, S, _DcgBody).
+dcg_maplist1_([X|Xs], S0, S, DcgBody) :-
+    call(DcgBody, X, S0, S1),
+    dcg_maplist1_(Xs, S1, S, DcgBody).
+
+
+:- non_terminal(dcg_maplist//3).
+
+%% dcg_maplist(+Arity2DcgBody, ?List1, ?List2)//.
+%
+dcg_maplist(DcgBody, Xs, Ys, S, S0) :-
+    dcg_maplist_(Xs, Ys, S, S0, DcgBody).
+
+dcg_maplist_([], [], S, S, _DcgBody).
+dcg_maplist_([X|Xs], [Y|Ys], S0, S, DcgBody) :-
+    call(DcgBody, X, Y, S0, S1),
+    dcg_maplist_(Xs, Ys, S1, S, DcgBody).

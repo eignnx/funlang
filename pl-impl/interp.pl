@@ -10,8 +10,10 @@
 :- op(1198, xfy, where).
 :- op(1106, xfy, --).
 :- op(1106, fx, --).
+:- op(1106, xf, --).
 
 term_expansion((Head do ( Before -- After ) where Ops), (Head, After --> Before, { Ops })).
+term_expansion((Head do ( Before -- ) where Ops), (Head --> Before, { Ops })).
 term_expansion((Head do ( -- After ) where Ops), (Head, After --> { Ops })).
 term_expansion((Head do ( Before -- After )), (Head, After --> Before)).
 
@@ -19,6 +21,7 @@ term_expansion((Head do ( Before -- After )), (Head, After --> Before)).
 bool(X) --> immediate_bytes(byte, bool(X)).
 num(Value, nat) --> immediate_bytes(qword, nat(Value)).
 num(Value, int) --> immediate_bytes(qword, int(Value)).
+short(Value) --> immediate_bytes(short, nat(Value)).
 bytes(Bytes, NBytes) --> { length(Bytes, NBytes) }, Bytes.
 
 and(true, true, true) :- !.
@@ -80,6 +83,14 @@ exe(lt(Ty)) do ( num(A, Ty), num(B, Ty) -- bool(C) ) where
 exe(eq(NBytes)) do ( bytes(A, NBytes), bytes(B, NBytes) -- bool(C) ) where
     A == B -> C = true ; C = false.
 
+exe(syscall(0)) do ( num(Nat, nat) -- ) where
+    format('~d', [Nat]).
+
+exe(syscall(1)) do ( num(Int, int) -- ) where
+    format('~d', [Int]).
+
+exe(syscall(2)) do ( bool(B) -- ) where
+    format('~a', [B]).
 
 :- use_module(library(plunit)).
 :- begin_tests(interp).

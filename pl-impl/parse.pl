@@ -94,46 +94,85 @@ expr_rec_follow(_Lvl, E->E) --> []. % If you can't parse another term at this le
 expr_rec_below(Lvl, E) -->
     { Below is Lvl - 1 }, expr_rec(Below, E).
 
+comma_sep(DcgBody, Items) -->
+    sequence(DcgBody, [sym(',')@_], Items).
+
 :- det(expr_norec//1).
 
 % An expression who's grammar rule does NOT contain left recursion.
 expr_norec(lit(int(I))@Ln) --> [lit(int(I))@Ln], !.
 expr_norec(lit(nat(I))@Ln) --> [lit(nat(I))@Ln], !.
 expr_norec(lit(bool(B))@Ln) --> [lit(bool(B))@Ln], !.
+expr_norec(lit(text(T))@Ln) --> [lit(text(T))@Ln], !.
+expr_norec(lit(variant(Head, Es))@Ln) -->
+    [sym('{')@Ln, sym(:)@_], !,
+    [id(Head)@_],
+    comma_sep(expr, Es),
+    [sym('}')@_].
+expr_norec(lit(tuple(Es))@Ln) -->
+    [sym('{')@Ln], !,
+    comma_sep(expr, Es),
+    [sym('}')@_].
+expr_norec(lit(list(Es))@Ln) -->
+    [sym('[')@Ln], !,
+    comma_sep(expr, Es),
+    [sym(']')@_].
+expr_norec(intr(Intr, E)@Ln) -->
+    [kw(intr)@Ln, sym('.')@_],
+    { intrinsic_name(Intr) }, [id(Intr)@_], !,
+    [sym('[')@_],
+    expr(E),
+    [sym(']')@_].
 expr_norec(if(Cond, Yes, No)@Ln) -->
     [kw(if)@Ln], !, expr(Cond),
     ( [kw(do)@_], ! | [kw(then)@_] ), expr(Yes),
     [kw(else)@_], expr(No),
     [kw(end)@_].
 expr_norec(let(X, Expr)@Ln) --> [kw(let)@Ln], !, [id(X)@_, sym(=)@_], expr(Expr), [sym(';')@_].
-expr_norec(var(X)@Ln) --> [id(X)@Ln], !.
 expr_norec(block(Expr)@Ln) --> [kw(do)@Ln], !, expr(Expr), [kw(end)@_].
+expr_norec(lam(Params, Body)@Ln) -->
+    [sym('|')@Ln], !, comma_sep(id, Params), [sym('|')@_],
+    expr(Body).
 expr_norec(match(Scrut, Arms)@Ln) -->
     [kw(match)@Ln], !,
     expr(Scrut),
     sequence(match_arm, Arms),
     [kw(end)@_].
-expr_norec(Expr) --> [sym('(')@_], !, expr(Expr), [sym(')')@_].
 expr_norec(unop('-', Expr)@Ln) --> [sym('-')@Ln], !, expr(Expr).
-expr_norec(unop('!', Expr)@Ln) --> [sym('!')@Ln], !, expr(Expr).
+expr_norec(unop(not, Expr)@Ln) --> [kw(not)@Ln], !, expr(Expr).
 expr_norec(unop('~', Expr)@Ln) --> [sym('~')@Ln], !, expr(Expr).
+expr_norec(call_direct(Fn, Args)@Ln) -->
+    [id(Fn)@Ln, sym('[')@_], !,
+    sequence(expr, [sym(',')@_], Args),
+    [sym(']')@_].
+expr_norec(var(X)@Ln) --> [id(X)@Ln], !.
+expr_norec(call_indirect(Fn, Args)@Ln) -->
+    [sym('(')@Ln], expr(Fn), [sym(')')@_],
+    [sym('[')@_], !,
+    sequence(expr, [sym(',')@_], Args),
+    [sym(']')].
+expr_norec(Expr) --> [sym('(')@_], !, expr(Expr), [sym(')')@_].
 
 
 match_arm(case(Pat, Expr)@Ln) -->
-    [sym('|')@Ln],
-    pattern(Pat),
-    [sym(=>)@_],
-    expr(Expr).
+    [sym('|')@Ln], pattern(Pat), [sym(=>)@_], expr(Expr).
 
 pattern(refut(variant(Name, Params))@Ln) -->
     [sym('{')@Ln, sym(:)@_], !, [id(Name)@_],
     sequence(pattern, [sym(',')@_], Params),
     [sym('}')@_].
+pattern(irrefut(tuple(Ps))@Ln) -->
+    [sym('{')@Ln], !,
+    sequence(pattern, [sym(',')@_], Ps),
+    [sym('}')@_].
 pattern(refut(lit(Literal))@Ln) --> [lit(Literal)@Ln], !.
 pattern(irrefut(var(Name))@Ln) --> [id(Name)@Ln].
 
-/*
-phrase(expr(E),
-    [kw(if), lit(bool(true)), kw(then), lit(int(123)), sym(+), lit(int(456)), kw(else), lit(int(999)), kw(end)]
-).
-*/
+intrinsic_name(dbg_nat).
+intrinsic_name(dbg_int).
+intrinsic_name(dbg_bool).
+intrinsic_name(dbg_text).
+intrinsic_name(puts).
+intrinsic_name(putc).
+
+id(Ident) --> [id(Ident)@_].

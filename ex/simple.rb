@@ -1,4 +1,4 @@
 
-def simple[] -> Nat do
-  123
+def simple[] -> Int do
+  -3 * +4
 end

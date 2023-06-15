@@ -36,7 +36,8 @@ ws_(NLs0, NLs) --> (['\n'] | ['\r', '\n']), !, { NLs1 is NLs0 + 1 }, ws_(NLs1, N
 ws_(NLs,  NLs) --> [].
 
 tok( lit(nat(I)) ) --> integer(I), !.
-tok( lit(int(I)) ) --> (['-'] | ['+']), integer(I), !.
+tok( lit(int(J)) ) --> ['-'], integer(I), { J is -I }, !.
+tok( lit(int(I)) ) --> ['+'], integer(I), !.
 tok( lit(bool(true)) ) --> atom(true), !.
 tok( lit(bool(false)) ) --> atom(false), !.
 tok( lit(text(Txt)) ) --> ['"'], !, string_without("\"\n", Txt), ['"'].
@@ -51,6 +52,7 @@ keyword(if). keyword(match). keyword(while).
 keyword(fn).
 keyword(let).
 keyword(and). keyword(or). keyword(not). keyword(xor).
+keyword(intr).
 
 symbol('('). symbol(')').
 symbol('['). symbol(']').

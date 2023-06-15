@@ -25,7 +25,7 @@ main_([SrcFile]) :-
                     Item = @(_, Ln),
                     throw(error('Typechecking failed!', Ln))
             ),
-            phrase(hir(Tast), Hir), % Lower the TAST to HIR.
+            phrase(item_hir(Tast), Hir), % Lower the TAST to HIR.
             format('Hir = '), portray_clause(Hir),
             phrase(hir_to_lir(Hir), Lir), % Lower HIR to LIR.
             format('Lir = '), portray_clause(Lir)

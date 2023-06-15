@@ -1,4 +1,10 @@
-:- module(hir, [hir_instr/1, immediate/1, hir_instr_annotated/2]).
+:- module(hir, [
+    hir_instr/1,
+    immediate/1,
+    hir_instr_annotated/2,
+    syscall_number/2
+]).
+
 :- use_module(tycheck, [op(10, xfy, ::)]).
 :- use_module(serde, [memspec_size/2]).
 :- use_module(ty, [type_size/2]).
@@ -37,3 +43,9 @@ hir_instr(-ret).
 
 hir_instr_annotated(Instr, +Instr) :- hir_instr(+Instr).
 hir_instr_annotated(Instr, -Instr) :- hir_instr(-Instr).
+
+syscall_number(dbg_bool, 0).
+syscall_number(dbg_nat, 1).
+syscall_number(dbg_int, 2).
+syscall_number(puts, 3).
+syscall_number(putc, 4).
