@@ -44,6 +44,8 @@ dupkeypairs_to_assoc(DupKeyPairs, Assoc) :-
 dcg_maplist(DcgBody, Xs, S, S0) :-
     dcg_maplist_(Xs, S, S0, DcgBody).
 
+:- non_terminal(dcg_maplist_//2).
+
 dcg_maplist_([], S, S, _DcgBody).
 dcg_maplist_([X|Xs], S0, S, DcgBody) :-
     call(DcgBody, X, S0, S1),
@@ -56,6 +58,8 @@ dcg_maplist_([X|Xs], S0, S, DcgBody) :-
 %
 dcg_maplist(DcgBody, Xs, Ys, S, S0) :-
     dcg_maplist_(Xs, Ys, S, S0, DcgBody).
+
+:- non_terminal(dcg_maplist_//3).
 
 dcg_maplist_([], [], S, S, _DcgBody).
 dcg_maplist_([X|Xs], [Y|Ys], S0, S, DcgBody) :-

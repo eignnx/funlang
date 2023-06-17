@@ -12,12 +12,13 @@
 % Facts for `item_name_value` will be asserted during HIR generation.
 :- dynamic item_name_value/2.
 
+% :- det(hir//1).
 %! hir(+TmTyDict)//
 %
 % @see ./hir.md for high-level details about this translation.
 hir(::{tm:Tm, ty:Ty}) --> hir_(Tm::Ty).
 
-:- det(hir_//1).
+% :- det(hir_//1).
 :- discontiguous hir_//1.
 
 hir_(lit(int(I)) :: _) --> [const(qword, int(I))].
@@ -111,14 +112,22 @@ hir_([E | Es] :: _) -->
     hir(E),
     hir(Es :: _).
 
+hir_(call(::{tm: var(FnName), ty: _}, Args) :: _) -->
+    !,
+    hir(Args :: _),
+    { length(ArgC, Args) },
+    { FnLbl = FnName },
+    [call(FnLbl, ArgC)].
+
 hir_(call(Fn, Args) :: _) -->
     hir(Args :: _),
     hir(Fn),
     { length(ArgC, Args) },
-    { FnLbl = ?????? },
-    [call_direct(FnLbl, ArgC)].
+    [call_indirect(ArgC)].
 
-gen_hir_from_item(def{name:Name, params:_Params, ret_ty:_RetTy, body:Body} :: _) :-
+hir_(OTHER) --> { throw(error(unimplemented(hir_(OTHER)))) }.
+
+gen_hir_from_item(::{tm: def{name:Name, params:_Params, ret_ty:_RetTy, body:Body}, ty: _}) :-
     phrase((
         [label(Name)],
         hir(Body),
@@ -126,7 +135,16 @@ gen_hir_from_item(def{name:Name, params:_Params, ret_ty:_RetTy, body:Body} :: _)
     ), BodyHir),
     assertz( item_name_value(Name, hir(BodyHir)) ).
 
-gen_hir_from_items([]).
-gen_hir_from_items([Item | Items]) :-
-    gen_hir_from_item(Item),
-    gen_hir_from_items(Items).
+gen_hir_from_item(OTHER) :- throw(error(unimplemented(gen_hir_from_item(OTHER)))).
+
+gen_hir_from_items(Items) :-
+    abolish(item_name_value/2),
+    gen_hir_from_items_(Items).
+
+gen_hir_from_items_([]).
+gen_hir_from_items_([Item | Items]) :-
+    (   once(gen_hir_from_item(Item)) -> true
+    ;
+        throw(error('failure to gen HIR for item'(Item)))
+    ),
+    gen_hir_from_items_(Items).

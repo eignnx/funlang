@@ -8,6 +8,7 @@
 :- use_module(serde, [unsigned_bytes//2, signed_bytes//2]).
 :- use_module(hir, [hir_instr/1, hir_instr_annotated/2]).
 :- use_module(ty, [type_size/2]).
+:- use_module(tast_to_hir, [item_name_value/2]).
 :- use_module(utils, [
     dcg_maplist//2,
     dcg_maplist//3,
@@ -15,9 +16,9 @@
     op(1050, xfy, else),
     else/2
 ]).
-:- use_module(tast_to_hir, [item_name_value/2]).
 
 :- use_module(library(assoc)).
+:- use_module(library(clpfd)).
 
 
 lir_instr(halt). lir_instr(nop).
@@ -124,6 +125,8 @@ lir(+pop(NBytes), _, _) -->
     unsigned_bytes(short, NBytes).
 
 lir(-Instr, _, _) --> opcode(Instr).
+
+lir(OTHER) --> { throw(error(unimplemented(lir(OTHER)))) }.
     
 opcode(Instr) --> [OpCode], { lir_instr_opcode(Instr, OpCode) }.
 
@@ -133,17 +136,54 @@ opcode(Instr) --> [OpCode], { lir_instr_opcode(Instr, OpCode) }.
 % @see ./hir_to_lir.md for high-level overview of the translation process here.
 hir_to_lir -->
     { findall(Name-Value, item_name_value(Name, Value), NamesValues) },
-    { pairs_keys_values(NamesValues, Names, Values) },
-    dcg_maplist(gen_lir, Names, Values).
+    gen_lir(NamesValues, 0, []).
 
-gen_lir(FnName, hir(Hir)) -->
-    dcg_maplist([Instr]>>lir(Instr, _, FnName), Hir).
 
-gen_lir(_StaticName, static_text(Text)) -->
-    text_to_bytes(Text).
+:- discontiguous gen_lir//3.
 
-text_to_bytes(Text) -->
+gen_lir([], _ByteIndex, _LblAssoc) --> [].
+gen_lir([FnName-hir(Instrs)|Items], ByteIndex0, LblAssoc0) -->
+    { phrase(
+        process_hir_instrs(Instrs, ByteIndex0, LblAssoc0->LblAssoc, FnName),
+        Lir
+    ) },
+    { length(Lir, NBytes) },
+    { ByteIndex = ByteIndex0 + NBytes },
+    Lir,
+    gen_lir(Items, ByteIndex, LblAssoc).
+
+
+
+%! process_hir_instrs(Instrs, ByteIndex, LblAssoc0->LblAssoc, FnName)//
+%
+%
+process_hir_instrs([], _, _, _) --> [].
+process_hir_instrs([label(Lbl) | Instrs], CurrentIndex, LblAssoc0->LblAssoc, FnName) -->
+    % !,
+    { LblAssoc1 = [Lbl-CurrentIndex | LblAssoc0] },
+    process_hir_instrs(Instrs, CurrentIndex, LblAssoc1->LblAssoc, FnName).
+process_hir_instrs([Instr | Instrs], CurrentIndex, LblAssoc0->LblAssoc, FnName) -->
+    % Before we can pass `Instr` to `lir//3`, we need to annotate it.
+    { hir_instr_annotated(Instr, InstrAnn) },
+    % First, generate the LIR, but store it in a variable first. That way
+    % its length can be inspected in order to keep `CurrentIndex` up to date.
+    { phrase(lir(InstrAnn, LblAssoc0, FnName), Lir) },
+    { length(Lir, NBytes) },
+    Lir, % Actually emit the LIR.
+    { NewIndex #= CurrentIndex + NBytes },
+    process_hir_instrs(Instrs, NewIndex, LblAssoc0->LblAssoc, FnName).
+
+
+gen_lir([StaticName-static_text(Text) | Items], ByteIndex0, LblAssoc0) -->
+    { LblAssoc = [StaticName-ByteIndex0 | LblAssoc0] },
+    text_to_bytes(Text, NBytes),
+    { ByteIndex = ByteIndex0 + NBytes },
+    gen_lir(Items, ByteIndex, LblAssoc).
+
+
+text_to_bytes(Text, NBytes) -->
     { maplist(char_code, Text, Bytes) },
+    { length(Bytes, NBytes) },
     Bytes.
 
 
