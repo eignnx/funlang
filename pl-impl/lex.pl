@@ -47,8 +47,8 @@ tok( sym(Sym) ) --> { symbol(Sym) }, atom(Sym), !.
 
 keyword(def).
 keyword(type). keyword(rec).
-keyword(do). keyword(end).
-keyword(if). keyword(match). keyword(while).
+keyword(do). keyword(then). keyword(end).
+keyword(if). keyword(else). keyword(match). keyword(while).
 keyword(fn).
 keyword(let).
 keyword(and). keyword(or). keyword(not). keyword(xor).

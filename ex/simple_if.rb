@@ -1,4 +1,8 @@
 
-def simple[] -> Void do
-  intr.dbg_nat[123]
+def simple[] -> Nat do
+  if true do
+    123
+  else
+    456
+  end
 end

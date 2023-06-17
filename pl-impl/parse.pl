@@ -4,6 +4,9 @@
 :- use_module(lex, [tokens//1, op(12, xfy, @)]).
 :- set_prolog_flag(double_quotes, chars).
 
+%! parse(?Nonterminal, +SourceCode:list(char)).
+%
+%
 parse(Nonterminal, Src) :-
     phrase(tokens(Ts), Src),
     phrase(Nonterminal, Ts).
@@ -58,8 +61,6 @@ ty(alias(Name, Params)) -->
         { Params = [] }
     ).
 
-expr(Expr) --> expr_rec(Expr).
-
 % Operator Deference Table ("deference" is the inverse of precedence)
 % ========================
 lvl_op(6, or). lvl_op(6, xor).
@@ -73,22 +74,34 @@ lvl_op(Lvl, Op@Ln) --> % To parse an operator of a certain level...
     { lvl_op(Lvl, Op) }, % ...first find an op of the given level...
     ( [sym(Op)@Ln] | [kw(Op)@Ln] ). % ...then try to parse it.
 
-max_deference_lvl(Lvl) :-
-    lvl_op(Lvl, _), !. % Just find the first one listed.
 
-expr_rec(E) --> { max_deference_lvl(Lvl) }, expr_rec(Lvl, E).
+:- dynamic max_deference_lvl/1.
+:- (abolish(max_deference_lvl/1),
+    findall(Lvl, lvl_op(Lvl, _), Lvls),
+    max_member(MaxLvl, Lvls),
+    assertz(max_deference_lvl(MaxLvl))
+).
 
-expr_rec(0, E) --> !,
-    expr_norec(E). % A "level-0" expression is one without left-recursion.
+
+expr(Expr) --> expr_rec(Expr).
+
+expr_rec(E) -->
+    { max_deference_lvl(Lvl) },
+    expr_rec(Lvl, E).
+expr_rec(0, E) --> !, % A "level-0" expression is one without left-recursion.
+    expr_norec(E).
 expr_rec(Lvl, E) -->
-    expr_rec_below(Lvl, E1), % First parse a term one level lower in the "operator deference" table.
-    expr_rec_follow(Lvl, E1->E). % The, passing E1 as an argument to `..._follow`, parse the rest of the term.
+    expr_rec_below(Lvl, E1),     % First parse a term one level lower in the "operator deference" table.
+    expr_rec_follow(Lvl, E1->E). % Then, passing E1 as an argument to `..._follow`, parse the rest of the term.
+
 expr_rec_follow(Lvl, E1->E) -->
-    lvl_op(Lvl, Op@Ln), !, % Try to parse the operator itself. Commit if found.
-    expr_rec_below(Lvl, E2), % Parse a term one level lower in the "operator deference" table.
+    lvl_op(Lvl, Op@Ln), !,           % Try to parse the operator itself. Commit if found.
+    expr_rec_below(Lvl, E2),         % Parse a term one level lower in the "operator deference" table.
     { E1E2 = binop(Op, E1, E2)@Ln }, % Construct the actual term.
-    expr_rec_follow(Lvl, E1E2->E). % Try to continue parsing at this level. (E1E2 would be used as the next E1).
-expr_rec_follow(_Lvl, E->E) --> []. % If you can't parse another term at this level, just yield what you've got.
+    expr_rec_follow(Lvl, E1E2->E).   % Try to continue parsing at this level. (E1E2 would be used as the next E1).
+expr_rec_follow(_Lvl, E->E) --> !.   % If you can't parse another term at this level, just yield what you've got.
+expr_rec_follow(Lvl, E1->E) -->
+    { throw(error(nonexhastive(expr_rec_follow(Lvl, E1->E)))) }.
 
 % Just a helper :)
 expr_rec_below(Lvl, E) -->
@@ -97,7 +110,6 @@ expr_rec_below(Lvl, E) -->
 comma_sep(DcgBody, Items) -->
     sequence(DcgBody, [sym(',')@_], Items).
 
-:- det(expr_norec//1).
 
 % An expression who's grammar rule does NOT contain left recursion.
 expr_norec(lit(int(I))@Ln) --> [lit(int(I))@Ln], !.
@@ -124,8 +136,9 @@ expr_norec(intr(Intr, E)@Ln) -->
     expr(E),
     [sym(']')@_].
 expr_norec(if(Cond, Yes, No)@Ln) -->
-    [kw(if)@Ln], !, expr(Cond),
-    ( [kw(do)@_], ! | [kw(then)@_] ), expr(Yes),
+    [kw(if)@Ln], !,
+    expr(Cond),
+    ( [kw(do)@_] | [kw(then)@_] ), !, expr(Yes),
     [kw(else)@_], expr(No),
     [kw(end)@_].
 expr_norec(let(X, Expr)@Ln) --> [kw(let)@Ln], !, [id(X)@_, sym(=)@_], expr(Expr), [sym(';')@_].
@@ -152,6 +165,8 @@ expr_norec(call_indirect(Fn, Args)@Ln) -->
     sequence(expr, [sym(',')@_], Args),
     [sym(']')].
 expr_norec(Expr) --> [sym('(')@_], !, expr(Expr), [sym(')')@_].
+expr_norec(OTHER) -->
+    { throw(error(nonexhastive(expr_norec(OTHER)))) }.
 
 
 match_arm(case(Pat, Expr)@Ln) -->
