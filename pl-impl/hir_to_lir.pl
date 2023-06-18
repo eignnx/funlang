@@ -14,7 +14,8 @@
     dcg_maplist//3,
     dupkeypairs_to_assoc/2,
     op(1050, xfy, else),
-    else/2
+    else/2,
+    get_or_insert_assoc/4
 ]).
 
 :- use_module(library(assoc)).
@@ -100,11 +101,11 @@ lir(+store(Local :: Ty), _, CurrentScope) -->
     { gen_id(CurrentScope, Local, Id) },
 	immediate_bytes(short, Id).
 
-lir(+jmp(Label), LabelAssoc, _) -->
-    { get_assoc(Label, LabelAssoc, Index) else throw(error(unknown_key_in_assoc(Label), _)) },
+lir(+jmp(jmp_tgt(Label)), LabelAssoc0, _) -->
+    { get_or_insert_assoc(Label, LabelAssoc0, Index, LabelAssoc) else throw(error(unknown_key_in_assoc(Label), _)) },
     opcode(jmp),
     unsigned_bytes(word, Index).
-lir(+jmp_if_false(Label), LabelAssoc, _) -->
+lir(+jmp_if_false(jmp_tgt(Label)), LabelAssoc, _) -->
     { get_assoc(Label, LabelAssoc, Index) else throw(error(unknown_key_in_assoc(Label), _)) },
     opcode(jmp_if_false),
     unsigned_bytes(word, Index).
@@ -136,7 +137,8 @@ opcode(Instr) --> [OpCode], { lir_instr_opcode(Instr, OpCode) }.
 % @see ./hir_to_lir.md for high-level overview of the translation process here.
 hir_to_lir -->
     { findall(Name-Value, item_name_value(Name, Value), NamesValues) },
-    gen_lir(NamesValues, 0, []).
+    { empty_assoc(LblAssoc) },
+    gen_lir(NamesValues, 0, LblAssoc).
 
 
 :- discontiguous gen_lir//3.
@@ -159,8 +161,9 @@ gen_lir([FnName-hir(Instrs)|Items], ByteIndex0, LblAssoc0) -->
 %
 process_hir_instrs([], _, _, _) --> [].
 process_hir_instrs([label(Lbl) | Instrs], CurrentIndex, LblAssoc0->LblAssoc, FnName) -->
-    % !,
-    { LblAssoc1 = [Lbl-CurrentIndex | LblAssoc0] },
+    !,
+    { put_assoc(Lbl, LblAssoc0, CurrentIndex, LblAssoc1) },
+    % { LblAssoc1 = [Lbl-CurrentIndex | LblAssoc0] },
     process_hir_instrs(Instrs, CurrentIndex, LblAssoc1->LblAssoc, FnName).
 process_hir_instrs([Instr | Instrs], CurrentIndex, LblAssoc0->LblAssoc, FnName) -->
     % Before we can pass `Instr` to `lir//3`, we need to annotate it.
@@ -175,7 +178,8 @@ process_hir_instrs([Instr | Instrs], CurrentIndex, LblAssoc0->LblAssoc, FnName) 
 
 
 gen_lir([StaticName-static_text(Text) | Items], ByteIndex0, LblAssoc0) -->
-    { LblAssoc = [StaticName-ByteIndex0 | LblAssoc0] },
+    { put_assoc(StaticName, LblAssoc0, ByteIndex0, LblAssoc) },
+    % { LblAssoc = [StaticName-ByteIndex0 | LblAssoc0] },
     text_to_bytes(Text, NBytes),
     { ByteIndex = ByteIndex0 + NBytes },
     gen_lir(Items, ByteIndex, LblAssoc).

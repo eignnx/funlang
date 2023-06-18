@@ -6,6 +6,7 @@
     , dcg_maplist//3
     , dupkeypairs_to_assoc/2
     , op(1050, xfy, else), else/2
+    , get_or_insert_assoc/4
     ]
 ).
 
@@ -65,3 +66,16 @@ dcg_maplist_([], [], S, S, _DcgBody).
 dcg_maplist_([X|Xs], [Y|Ys], S0, S, DcgBody) :-
     call(DcgBody, X, Y, S0, S1),
     dcg_maplist_(Xs, Ys, S1, S, DcgBody).
+
+
+:- use_module(library(assoc)).
+
+get_or_insert_assoc(Key, Assoc0, Value, Assoc) :-
+    (   get_assoc(Key, Assoc0, Value) ->
+        Assoc = Assoc0
+    ;
+        put_assoc(Key, Assoc0, Value, Assoc)
+    ).
+    
+    
+    
