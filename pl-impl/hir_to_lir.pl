@@ -1,5 +1,5 @@
 :- module(hir_to_lir, [
-    hir_to_lir//0,
+    hir_to_lir/1,
     lir_instr/1,
     immediate_bytes//2
 ]).
@@ -14,9 +14,19 @@
     dcg_maplist//3,
     dupkeypairs_to_assoc/2,
     op(1050, xfy, else),
-    else/2,
-    get_or_insert_assoc/4
+    else/2
 ]).
+:- use_module(lir_gen_state,
+    [ initial_lir_gen_state/1
+    , run_with_lir_gen_state/2
+    , emit_lir//1
+    , op(700, fx, emit_from), 'emit_from'//1
+    , current_fn//1
+    , set_current_fn//1
+    , label_index//2
+    , label_is_current_index//1
+    ]
+).
 
 :- use_module(library(assoc)).
 :- use_module(library(clpfd)).
@@ -83,106 +93,98 @@ gen_id(Scope, Symbol, NewId) :-
     assertz( generated_id(Scope, Symbol, NewId) ).
 
 
-%% lir(?AnnotatedHirInstruction, +CurrentScope)//.
+%% lir(?AnnotatedHirInstruction)//.
 %
-lir(+const(MemSpec, Imm), _, _) -->
+% Must be run with `run_with_lir_gen_state` instead of `phrase`.
+% lir(+const(byte, bool(Bool))) -->
+%     { format('>>>>>>>>>>>101~n') },
+% 	opcode(const(byte)),
+%     { byte_bool(Byte, Bool) },
+% 	emit_from [Byte],
+% 	% emit_from serde:unsigned_bytes(byte, Byte),
+%     { format('>>>>>>>>>>>105~n') },
+%     {true}.
+lir(+const(MemSpec, Imm)) -->
 	opcode(const(MemSpec)),
-	immediate_bytes(MemSpec, Imm).
-lir(+load(Local :: Ty), _, CurrentScope) -->
-	{ type_size(Ty, NBytes) },
+	emit_from hir_to_lir:immediate_bytes(MemSpec, Imm).
+lir(+load(Local :: Ty)) -->
 	opcode(load_local),
-	unsigned_bytes(short, NBytes),
+	{ type_size(Ty, NBytes) },
+	emit_from serde:unsigned_bytes(short, NBytes),
+    current_fn(CurrentScope),
     { gen_id(CurrentScope, Local, Id) },
-	immediate_bytes(short, Id).
-lir(+store(Local :: Ty), _, CurrentScope) -->
+	emit_from hir_to_lir:immediate_bytes(short, Id).
+lir(+store(Local :: Ty)) -->
 	{ type_size(Ty, NBytes) },
 	opcode(store_local),
-	unsigned_bytes(short, NBytes),
+	emit_from serde:unsigned_bytes(short, NBytes),
+    current_fn(CurrentScope),
     { gen_id(CurrentScope, Local, Id) },
-	immediate_bytes(short, Id).
+	emit_from hir_to_lir:immediate_bytes(short, Id).
 
-lir(+jmp(jmp_tgt(Label)), LabelAssoc0, _) -->
-    { get_or_insert_assoc(Label, LabelAssoc0, Index, LabelAssoc) else throw(error(unknown_key_in_assoc(Label), _)) },
+lir(+jmp(jmp_tgt(Label))) -->
+    label_index(Label, Index),
     opcode(jmp),
-    unsigned_bytes(word, Index).
-lir(+jmp_if_false(jmp_tgt(Label)), LabelAssoc, _) -->
-    { get_assoc(Label, LabelAssoc, Index) else throw(error(unknown_key_in_assoc(Label), _)) },
+    emit_from serde:unsigned_bytes(word, Index).
+lir(+jmp_if_false(jmp_tgt(Label))) -->
+    label_index(Label, Index),
     opcode(jmp_if_false),
-    unsigned_bytes(word, Index).
-lir(+call(NArgs, Label), LabelAssoc, _) -->
-    { get_assoc(Label, LabelAssoc, Index) else throw(error(unknown_key_in_assoc(Label), _)) },
+    emit_from serde:unsigned_bytes(word, Index).
+lir(+call(NArgs, Label)) -->
+    label_index(Label, Index),
     opcode(call),
-    unsigned_bytes(byte, NArgs),
-    unsigned_bytes(word, Index).
+    emit_from serde:unsigned_bytes(byte, NArgs),
+    emit_from serde:unsigned_bytes(word, Index).
 
-lir(+call_indirect(NArgs), _, _) -->
+lir(+call_indirect(NArgs)) -->
     opcode(call_indirect),
-    unsigned_bytes(byte, NArgs).
-lir(+syscall(N), _, _) -->
+    emit_from serde:unsigned_bytes(byte, NArgs).
+lir(+syscall(N)) -->
     opcode(syscall),
-    unsigned_bytes(short, N).
-lir(+pop(NBytes), _, _) -->
+    emit_from serde:unsigned_bytes(short, N).
+lir(+pop(NBytes)) -->
     opcode(pop),
-    unsigned_bytes(short, NBytes).
+    emit_from serde:unsigned_bytes(short, NBytes).
 
-lir(-Instr, _, _) --> opcode(Instr).
+lir(-Instr) --> opcode(Instr).
 
-lir(OTHER) --> { throw(error(unimplemented(lir(OTHER)))) }.
+% lir(OTHER) --> { throw(error(unimplemented(lir(OTHER)))) }.
     
-opcode(Instr) --> [OpCode], { lir_instr_opcode(Instr, OpCode) }.
+opcode(Instr) --> emit_lir([OpCode]), { lir_instr_opcode(Instr, OpCode) }.
 
 
-%! hir_to_lir//
+%! hir_to_lir(-Lir).
 %
 % @see ./hir_to_lir.md for high-level overview of the translation process here.
-hir_to_lir -->
-    { findall(Name-Value, item_name_value(Name, Value), NamesValues) },
-    { empty_assoc(LblAssoc) },
-    gen_lir(NamesValues, 0, LblAssoc).
+hir_to_lir(Lir) :-
+    findall(Name-Value, item_name_value(Name, Value), HirItems),
+    run_with_lir_gen_state(hir_to_lir:gen_lir(HirItems), Lir).
 
 
-:- discontiguous gen_lir//3.
+:- discontiguous gen_lir//1.
 
-gen_lir([], _ByteIndex, _LblAssoc) --> [].
-gen_lir([FnName-hir(Instrs)|Items], ByteIndex0, LblAssoc0) -->
-    { phrase(
-        process_hir_instrs(Instrs, ByteIndex0, LblAssoc0->LblAssoc, FnName),
-        Lir
-    ) },
-    { length(Lir, NBytes) },
-    { ByteIndex = ByteIndex0 + NBytes },
-    Lir,
-    gen_lir(Items, ByteIndex, LblAssoc).
+gen_lir([]) --> [].
+gen_lir([FnName-hir(Instrs)|Items]) -->
+    set_current_fn(FnName),
+    process_hir_instrs(Instrs),
+    gen_lir(Items).
 
 
-
-%! process_hir_instrs(Instrs, ByteIndex, LblAssoc0->LblAssoc, FnName)//
-%
-%
-process_hir_instrs([], _, _, _) --> [].
-process_hir_instrs([label(Lbl) | Instrs], CurrentIndex, LblAssoc0->LblAssoc, FnName) -->
-    !,
-    { put_assoc(Lbl, LblAssoc0, CurrentIndex, LblAssoc1) },
-    % { LblAssoc1 = [Lbl-CurrentIndex | LblAssoc0] },
-    process_hir_instrs(Instrs, CurrentIndex, LblAssoc1->LblAssoc, FnName).
-process_hir_instrs([Instr | Instrs], CurrentIndex, LblAssoc0->LblAssoc, FnName) -->
-    % Before we can pass `Instr` to `lir//3`, we need to annotate it.
+process_hir_instrs([]) --> [].
+process_hir_instrs([label(Lbl) | Instrs]) --> !,
+    label_is_current_index(Lbl),
+    process_hir_instrs(Instrs).
+process_hir_instrs([Instr | Instrs]) -->
+    % Before we can pass `Instr` to `lir//1`, we need to annotate it.
     { hir_instr_annotated(Instr, InstrAnn) },
-    % First, generate the LIR, but store it in a variable first. That way
-    % its length can be inspected in order to keep `CurrentIndex` up to date.
-    { phrase(lir(InstrAnn, LblAssoc0, FnName), Lir) },
-    { length(Lir, NBytes) },
-    Lir, % Actually emit the LIR.
-    { NewIndex #= CurrentIndex + NBytes },
-    process_hir_instrs(Instrs, NewIndex, LblAssoc0->LblAssoc, FnName).
+    lir(InstrAnn),
+    process_hir_instrs(Instrs).
 
 
-gen_lir([StaticName-static_text(Text) | Items], ByteIndex0, LblAssoc0) -->
-    { put_assoc(StaticName, LblAssoc0, ByteIndex0, LblAssoc) },
-    % { LblAssoc = [StaticName-ByteIndex0 | LblAssoc0] },
-    text_to_bytes(Text, NBytes),
-    { ByteIndex = ByteIndex0 + NBytes },
-    gen_lir(Items, ByteIndex, LblAssoc).
+gen_lir([StaticName-static_text(Text) | Items]) -->
+    label_is_current_index(StaticName),
+    emit_from text_to_bytes(Text, _NBytes),
+    gen_lir(Items).
 
 
 text_to_bytes(Text, NBytes) -->
@@ -190,39 +192,6 @@ text_to_bytes(Text, NBytes) -->
     { length(Bytes, NBytes) },
     Bytes.
 
-
-    % { phrase(first_pass(Hir), SymbolRecords) },
-    % { format('HirNoLabels = '), portray_clause(HirNoLabels) },
-    % second_pass(HirNoLabels, SymbolRecords).
-
-
-% first_pass([], [], _) --> [].
-
-% first_pass([label(Label), Instr | Hir], HirNoLabels, Index) --> !,
-%     [Label-Index], % Save the label-index pair...
-%     { var(Label) -> gensym(lbl_, UniqSym), Label = UniqSym ; true },
-%     first_pass([Instr | Hir], HirNoLabels, Index). % ...process the rest as if the label wasn't there.
-
-% first_pass([const(ptr, static_text(Text)) | Hir], HirNoLabels, Index0) --> !,
-%     { gensym('$static_text_', UniqSym) },
-%     [UniqSym-TextStart],
-%     { Index is Index0 + 1 },
-%     first_pass([const(qword, nat(TextStart)) | Hir], HirNoLabels0, Index),
-%     { length(HirNoLabels0, TextStart) },
-%     { maplist([Char, #(Code)]>>char_code(Char, Code), Text, Codes) },
-%     { append(HirNoLabels0, Codes, HirNoLabels) }.
-
-% first_pass([Instr | Hir], [Instr | HirNoLabels], Index0) -->
-%     { Index is Index0 + 1 },
-%     first_pass(Hir, HirNoLabels, Index).
-
-    
-% second_pass([], _LabelAssoc) --> [].
-% second_pass([#(Code) | Hirs], LabelAssoc) --> !, [Code], second_pass(Hirs, LabelAssoc).
-% second_pass([Hir | Hirs], LabelAssoc) -->
-%     { hir_instr_annotated(Hir, HirAnn) },
-%     lir(HirAnn, LabelAssoc),
-%     second_pass(Hirs, LabelAssoc).
 
 :- use_module(library(plunit)).
 :- begin_tests(hir_to_lir).

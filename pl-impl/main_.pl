@@ -4,7 +4,7 @@
 :- use_module(parse, [item//1]).
 :- use_module(tycheck, [typecheck/2]).
 :- use_module(tast_to_hir, [gen_hir_from_items/1, item_name_value/2]).
-:- use_module(hir_to_lir, [hir_to_lir//0]).
+:- use_module(hir_to_lir, [hir_to_lir/1]).
 
 :- use_module(library(pio), [phrase_from_file/2]).
 :- use_module(library(listing), [portray_clause/1]).
@@ -31,7 +31,7 @@ main_([SrcFile]) :-
             ;
                 throw(error('HIR generation failed!', _))
             ),
-            phrase(hir_to_lir, Lir), % Lower HIR to LIR.
+            once(hir_to_lir(Lir)), % Lower HIR to LIR.
             format('Lir = '), portray_clause(Lir)
         ),
         error(ty_err(Err), @(Description, Line)),
