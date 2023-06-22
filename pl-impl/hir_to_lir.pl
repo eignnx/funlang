@@ -183,13 +183,12 @@ process_hir_instrs([Instr | Instrs]) -->
 
 gen_lir([StaticName-static_text(Text) | Items]) -->
     label_is_current_index(StaticName),
-    emit_from text_to_bytes(Text, _NBytes),
+    emit_from hir_to_lir:text_to_bytes(Text),
     gen_lir(Items).
 
 
-text_to_bytes(Text, NBytes) -->
+text_to_bytes(Text) -->
     { maplist(char_code, Text, Bytes) },
-    { length(Bytes, NBytes) },
     Bytes.
 
 
